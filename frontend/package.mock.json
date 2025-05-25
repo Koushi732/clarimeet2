@@ -1,0 +1,106 @@
+{
+  "name": "clarimeet-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@headlessui/react": "^1.7.17",
+    "@heroicons/react": "^2.2.0",
+    "@types/file-saver": "^2.0.7",
+    "axios": "^1.6.0",
+    "classnames": "^2.3.2",
+    "date-fns": "^2.30.0",
+    "file-saver": "^2.0.5",
+    "framer-motion": "^10.18.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-draggable": "^4.4.6",
+    "react-router-dom": "^6.30.1",
+    "react-scripts": "5.0.1",
+    "react-use-websocket": "^4.5.0",
+    "recharts": "^2.9.3",
+    "tailwindcss": "^3.3.5",
+    "uuid": "^9.0.1",
+    "zustand": "^4.4.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/forms": "^0.5.6",
+    "@testing-library/jest-dom": "^5.17.0",
+    "@testing-library/react": "^13.4.0",
+    "@testing-library/user-event": "^13.5.0",
+    "@types/jest": "^27.5.2",
+    "@types/node": "^16.18.60",
+    "@types/react": "^18.3.22",
+    "@types/react-dom": "^18.3.7",
+    "@types/react-router-dom": "^5.3.3",
+    "@types/uuid": "^9.0.6",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^36.3.1",
+    "electron-builder": "^26.0.12",
+    "electron-is-dev": "^3.0.1",
+    "postcss": "^8.4.31",
+    "typescript": "^4.9.5",
+    "wait-on": "^8.0.3"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "electron:dev": "concurrently \"cross-env BROWSER=none npm start\" \"wait-on http://localhost:3000 && .\\start-electron.bat\"",
+    "electron:build": "npm run build && electron-builder",
+    "electron:start": "electron .",
+    "integrated": "node start-integrated.js",
+    "start:mock": "cross-env REACT_APP_USE_MOCK=true react-scripts start"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "main": "electron.js",
+  "build": {
+    "appId": "com.clarimeet.app",
+    "productName": "Clarimeet",
+    "files": [
+      "build/**/*",
+      "electron.js",
+      "preload.js"
+    ],
+    "directories": {
+      "buildResources": "public"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "public/favicon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "public/favicon.ico"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "public/favicon.ico"
+    }
+  }
+}

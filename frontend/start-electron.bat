@@ -1,0 +1,3 @@
+@echo off
+echo Starting Electron app...
+.\node_modules\.bin\electron .

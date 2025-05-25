@@ -1,0 +1,29 @@
+fastapi==0.104.1
+uvicorn==0.23.2
+python-multipart==0.0.6
+websockets==11.0.3
+pydantic==2.4.2
+sqlalchemy==2.0.22
+aiofiles==23.2.1
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+speechrecognition==3.10.0
+pydub==0.25.1
+pyaudio==0.2.13
+sounddevice==0.4.6
+soundfile==0.12.1
+transformers==4.34.1
+torch==2.1.0
+numpy==1.26.0
+pandas==2.1.1
+# For Windows audio capture
+pywin32==306; sys_platform == 'win32'
+# For MacOS audio capture (user needs to install BlackHole separately)
+# For Linux audio capture
+pulseaudio-utils==0.0.1; sys_platform == 'linux'
+# For summarization
+nltk==3.8.1
+spacy==3.7.2
+# For testing
+pytest==7.4.2
+httpx==0.25.0
