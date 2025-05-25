@@ -199,6 +199,37 @@ const HomePage = (): React.ReactElement => {
           >
             Start Recording
           </Link>
+          
+          {/* Development Mode Button - No validation required */}
+          <button
+            onClick={() => {
+              // Import these functions directly to avoid issues
+              const { createMiniTab, createEnhancedMiniTab } = require('../utils/electronBridge');
+              
+              // Calculate screen width for positioning
+              const screenWidth = window.screen.width;
+              
+              // First try to create the MiniTab
+              createMiniTab({
+                x: screenWidth - 320,
+                y: 50,
+                width: 300,
+                height: 150
+              });
+              
+              // Then create the enhanced version with more panels
+              createEnhancedMiniTab({
+                x: screenWidth - 370,
+                y: 100,
+                width: 320,
+                height: 420
+              });
+            }}
+            className="btn bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 text-lg"
+          >
+            Open UI Panels (Dev Mode)
+          </button>
+          
           <Link
             to="/upload"
             className="btn btn-outline px-6 py-3 text-lg"
