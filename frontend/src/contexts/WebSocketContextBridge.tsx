@@ -44,11 +44,23 @@ export const useWebSocketBridge = () => {
   const useMockMode = true; // This should match the setting in WebSocketWrapper.tsx
   
   // Create refs to track if each context is available
+  const [isElectronAvailable, setIsElectronAvailable] = React.useState(false);
   const [isMockAvailable, setIsMockAvailable] = React.useState(false);
   const [isRealAvailable, setIsRealAvailable] = React.useState(false);
   
-  // Attempt to use the mock context first
+  // Check for Electron first, then mock, then real
   React.useEffect(() => {
+    // Check if Electron is available
+    setIsElectronAvailable(!!window.electron);
+    
+    // Check if context providers are available
+    try {
+      const electronCtx = document.getElementById('electron-websocket-provider');
+      setIsElectronAvailable(isElectronAvailable || !!electronCtx);
+    } catch (error) {
+      // Don't modify existing state
+    }
+    
     try {
       const mockCtx = document.getElementById('mock-websocket-provider');
       setIsMockAvailable(!!mockCtx);
@@ -62,23 +74,24 @@ export const useWebSocketBridge = () => {
     } catch (error) {
       setIsRealAvailable(false);
     }
-  }, []);
+  }, [isElectronAvailable]);
   
   // Use the context directly
   const context = React.useContext(FallbackContext);
   
-  // Use the context determined by the mode
-  if (useMockMode && isMockAvailable) {
+  // Priority order: Electron > Mock > Real
+  if (isElectronAvailable) {
+    // Use the Electron context (highest priority)
+    return context;
+  } else if (useMockMode && isMockAvailable) {
     // Use the mock context
-    // The context will be provided by WebSocketWrapper
     return context;
   } else if (!useMockMode && isRealAvailable) {
     // Use the real context
-    // The context will be provided by WebSocketWrapper
     return context;
   }
   
-  // Return the fallback context if neither is available
+  // Return the fallback context if no implementation is available
   return context;
 };
 

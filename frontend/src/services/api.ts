@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { handleApiError, ErrorCategory } from '../utils/errorHandler';
 
 // Create an axios instance with default config
 const api = axios.create({
@@ -88,21 +89,54 @@ export const audioApi = {
 // Session API
 export const sessionApi = {
   // Get all sessions
-  getSessions: () => api.get('/sessions'),
+  async getSessions() {
+    try {
+      const response = await api.get('/api/sessions');
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, { method: 'getSessions' });
+    }
+  },
   
   // Get session by ID
-  getSessionById: (sessionId: string) => api.get(`/sessions/${sessionId}`),
+  async getSessionById(sessionId: string) {
+    try {
+      const response = await api.get(`/sessions/${sessionId}`);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, { method: 'getSessionById' });
+    }
+  },
   
   // Update session
-  updateSession: (sessionId: string, title?: string, description?: string) => 
-    api.put(`/sessions/${sessionId}`, { title, description }),
+  async updateSession(sessionId: string, title?: string, description?: string) {
+    try {
+      const response = await api.put(`/sessions/${sessionId}`, { title, description });
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, { method: 'updateSession' });
+    }
+  },
   
   // Delete session
-  deleteSession: (sessionId: string) => api.delete(`/sessions/${sessionId}`),
+  async deleteSession(sessionId: string) {
+    try {
+      const response = await api.delete(`/sessions/${sessionId}`);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, { method: 'deleteSession' });
+    }
+  },
   
   // Export session
-  exportSession: (sessionId: string, format = 'json') => 
-    api.get(`/sessions/${sessionId}/export`, { params: { format } }),
+  async exportSession(sessionId: string, format = 'json') {
+    try {
+      const response = await api.get(`/sessions/${sessionId}/export`, { params: { format } });
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, { method: 'exportSession', format });
+    }
+  },
 };
 
 // Transcription API
