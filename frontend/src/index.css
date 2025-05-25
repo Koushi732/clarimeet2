@@ -71,8 +71,12 @@ code {
   }
   
   .mini-tab {
-    @apply fixed top-2 right-2 bg-white dark:bg-dark-700 rounded-lg shadow-float dark:shadow-float-dark p-3 z-50;
+    @apply bg-white dark:bg-dark-700 rounded-lg shadow-float dark:shadow-float-dark p-3;
     min-width: 300px;
+    position: absolute;
+    top: 0;
+    right: 0;
+    transition: box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out, border-color 0.2s ease-in-out;
   }
   
   .status-panel {

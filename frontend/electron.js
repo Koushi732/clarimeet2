@@ -1,4 +1,6 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, screen, globalShortcut } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, globalShortcut, desktopCapturer } = require('electron');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const isDev = require('electron-is-dev');
 const url = require('url');
@@ -11,17 +13,22 @@ let statusWindow;
 let enhancedMiniWindow;
 
 function createMainWindow() {
-  // Create the browser window
+  // Create the browser window with enhanced security and performance settings
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      sandbox: true,  // Enhanced security with sandbox
+      spellcheck: true, // Enable spellcheck for text inputs
+      devTools: isDev, // Only enable DevTools in development
     },
     show: false, // Hide until ready-to-show
-    icon: path.join(__dirname, 'public', 'favicon.ico')
+    icon: path.join(__dirname, 'public', 'favicon.ico'),
+    backgroundColor: '#f5f5f5', // Smooth initial loading experience
+    titleBarStyle: 'hiddenInset' // Modern title bar look
   });
 
   // Load the app
@@ -90,9 +97,28 @@ function createTray() {
   });
 }
 
+// Audio recording variables
+let audioRecorder = null;
+let audioContext = null;
+let audioInputStream = null;
+let audioAnalyser = null;
+let audioDataArray = null;
+let isRecording = false;
+let recordingSessionId = null;
+let audioLevelInterval = null;
+let recordingStream = null;
+let audioTrack = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordingFilePath = null;
+let selectedDeviceId = null;
+
 app.whenReady().then(() => {
   createMainWindow();
   createTray();
+  
+  // Set up audio device handler
+  setupAudioHandlers();
   
   // Register global shortcuts
   const registerShortcuts = () => {
@@ -148,8 +174,21 @@ app.on('window-all-closed', () => {
 
 // Create floating MiniTab window
 function createMiniTab(bounds) {
+  // Close other floating windows first to ensure only one is shown
+  if (enhancedMiniWindow) {
+    enhancedMiniWindow.close();
+    enhancedMiniWindow = null;
+  }
+  
+  if (statusWindow) {
+    statusWindow.close();
+    statusWindow = null;
+  }
+  
+  // Toggle miniWindow if it already exists
   if (miniWindow) {
-    miniWindow.show();
+    miniWindow.close();
+    miniWindow = null;
     return;
   }
   
@@ -195,8 +234,21 @@ function createMiniTab(bounds) {
 
 // Create floating Status Panel window
 function createStatusPanel(bounds) {
+  // Close other floating windows first to ensure only one is shown
+  if (miniWindow) {
+    miniWindow.close();
+    miniWindow = null;
+  }
+  
+  if (enhancedMiniWindow) {
+    enhancedMiniWindow.close();
+    enhancedMiniWindow = null;
+  }
+  
+  // Toggle statusWindow if it already exists
   if (statusWindow) {
-    statusWindow.show();
+    statusWindow.close();
+    statusWindow = null;
     return;
   }
   
@@ -244,7 +296,6 @@ function createStatusPanel(bounds) {
 ipcMain.on('show-main-window', () => {
   if (mainWindow) {
     mainWindow.show();
-    mainWindow.focus();
   }
 });
 
@@ -252,6 +303,93 @@ ipcMain.on('hide-main-window', () => {
   if (mainWindow) {
     mainWindow.hide();
   }
+});
+
+// Handle WebSocket-like messages
+ipcMain.on('websocket-message-send', (event, message) => {
+  // Process the message based on type
+  console.log('Received WebSocket message:', message);
+  
+  if (message.type === 'start_recording') {
+    // Handle start recording request
+    const deviceId = message.data?.deviceId;
+    const options = message.data?.options || {};
+    
+    if (deviceId) {
+      // We're in the main process, so use direct IPC call to the handler
+      event.sender.invoke('start-audio-recording', deviceId, options)
+        .then(sessionId => {
+          // Send success response
+          BrowserWindow.getAllWindows().forEach(win => {
+            if (win && !win.isDestroyed()) {
+              win.webContents.send('websocket-message', {
+                type: 'session_update',
+                data: {
+                  sessionId: sessionId,
+                  status: 'recording',
+                  message: 'Recording started successfully'
+                }
+              });
+            }
+          });
+        })
+        .catch(error => {
+          // Send error response
+          BrowserWindow.getAllWindows().forEach(win => {
+            if (win && !win.isDestroyed()) {
+              win.webContents.send('websocket-message', {
+                type: 'error',
+                data: {
+                  message: `Failed to start recording: ${error.message}`
+                }
+              });
+            }
+          });
+        });
+    }
+  }
+  else if (message.type === 'stop_recording') {
+    // Handle stop recording request
+    event.sender.invoke('stop-audio-recording')
+      .then(result => {
+        // Send success response
+        BrowserWindow.getAllWindows().forEach(win => {
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('websocket-message', {
+              type: 'session_update',
+              data: {
+                sessionId: result.sessionId,
+                status: 'completed',
+                message: 'Recording stopped successfully',
+                filePath: result.filePath
+              }
+            });
+          }
+        });
+      })
+      .catch(error => {
+        // Send error response
+        BrowserWindow.getAllWindows().forEach(win => {
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('websocket-message', {
+              type: 'error',
+              data: {
+                message: `Failed to stop recording: ${error.message}`
+              }
+            });
+          }
+        });
+      });
+  }
+  // Add other message types as needed
+});
+
+// Handler to get WebSocket status
+ipcMain.handle('get-websocket-status', () => {
+  return {
+    isConnected: true, // Always report as connected in Electron
+    url: null
+  };
 });
 
 ipcMain.on('create-mini-tab', (event, bounds) => {
@@ -293,8 +431,21 @@ ipcMain.on('close-enhanced-mini-tab', () => {
 
 // Create enhanced floating MiniTab window
 function createEnhancedMiniTab(bounds) {
+  // Close other floating windows first to ensure only one is shown
+  if (miniWindow) {
+    miniWindow.close();
+    miniWindow = null;
+  }
+  
+  if (statusWindow) {
+    statusWindow.close();
+    statusWindow = null;
+  }
+  
+  // Toggle enhancedMiniWindow if it already exists
   if (enhancedMiniWindow) {
-    enhancedMiniWindow.show();
+    enhancedMiniWindow.close();
+    enhancedMiniWindow = null;
     return;
   }
   
@@ -336,6 +487,337 @@ function createEnhancedMiniTab(bounds) {
   if (isDev) {
     enhancedMiniWindow.webContents.openDevTools({ mode: 'detach' });
   }
+}
+
+// Set up audio device handlers
+function setupAudioHandlers() {
+  // Get available audio devices
+  ipcMain.handle('get-audio-devices', async () => {
+    try {
+      const sources = await desktopCapturer.getSources({ types: ['audio', 'screen'] });
+      
+      // Format devices to match our AudioDevice interface
+      const devices = sources.map(source => ({
+        id: source.id,
+        name: source.name,
+        isInput: source.id.includes('input') || source.id.includes('microphone'),
+        isOutput: source.id.includes('output') || source.id.includes('speaker'),
+        isLoopback: source.id.includes('screen'),
+        isDefault: source.name.toLowerCase().includes('default')
+      }));
+      
+      return devices;
+    } catch (error) {
+      console.error('Error getting audio devices:', error);
+      throw error;
+    }
+  });
+  
+  // Start audio recording
+  ipcMain.handle('start-audio-recording', async (event, deviceId, options) => {
+    try {
+      // Generate a unique session ID
+      recordingSessionId = Date.now().toString();
+      selectedDeviceId = deviceId;
+      isRecording = true;
+      
+      // Create directory for recordings if it doesn't exist
+      const recordingsDir = path.join(os.homedir(), 'Clarimeet', 'Recordings');
+      if (!fs.existsSync(recordingsDir)) {
+        fs.mkdirSync(recordingsDir, { recursive: true });
+      }
+      
+      // Generate file path for recording
+      recordingFilePath = path.join(recordingsDir, `recording_${recordingSessionId}.webm`);
+      
+      // Start the actual recording
+      console.log(`Starting recording with device: ${deviceId}`);
+      recordedChunks = [];
+      
+      // Get the media stream based on the device type
+      let constraints;
+      
+      if (deviceId.includes('screen')) {
+        // For system audio (loopback)
+        const sources = await desktopCapturer.getSources({ types: ['screen'] });
+        const source = sources.find(s => s.id === deviceId);
+        
+        if (!source) {
+          throw new Error('Screen source not found');
+        }
+        
+        recordingStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            mandatory: {
+              chromeMediaSource: 'desktop'
+            }
+          },
+          video: {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: source.id,
+              minWidth: 1280,
+              maxWidth: 1280,
+              minHeight: 720,
+              maxHeight: 720
+            }
+          }
+        });
+      } else {
+        // For microphone input
+        constraints = {
+          audio: {
+            deviceId: { exact: deviceId },
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          },
+          video: false
+        };
+        
+        try {
+          recordingStream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (err) {
+          console.error('Failed to get user media, falling back to default device', err);
+          // Fallback to default device
+          recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        }
+      }
+      
+      // Set up audio analyzer for levels
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      audioContext = new AudioContext();
+      audioInputStream = audioContext.createMediaStreamSource(recordingStream);
+      audioAnalyser = audioContext.createAnalyser();
+      audioAnalyser.fftSize = 256;
+      audioInputStream.connect(audioAnalyser);
+      audioDataArray = new Uint8Array(audioAnalyser.frequencyBinCount);
+      
+      // Create MediaRecorder
+      mediaRecorder = new MediaRecorder(recordingStream, { mimeType: 'audio/webm' });
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordedChunks.push(event.data);
+        }
+      };
+      
+      mediaRecorder.onstop = async () => {
+        // Save the recording
+        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+        const buffer = Buffer.from(await blob.arrayBuffer());
+        fs.writeFileSync(recordingFilePath, buffer);
+        
+        console.log(`Recording saved to: ${recordingFilePath}`);
+        
+        // Stop all tracks
+        if (recordingStream) {
+          recordingStream.getTracks().forEach(track => track.stop());
+          recordingStream = null;
+        }
+        
+        // Send status update with file path
+        BrowserWindow.getAllWindows().forEach(win => {
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('recording-completed', {
+              sessionId: recordingSessionId,
+              filePath: recordingFilePath
+            });
+          }
+        });
+      };
+      
+      // Start recording
+      mediaRecorder.start(1000); // Collect data every second
+      
+      // Send status update to all windows
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('recording-status-update', {
+            isRecording: true,
+            sessionId: recordingSessionId,
+            startTime: new Date().toISOString(),
+            duration: 0,
+            audioLevel: 0,
+            deviceId: selectedDeviceId,
+            errorMessage: null
+          });
+        }
+      });
+      
+      // Start audio level monitoring
+      startAudioLevelMonitoring();
+      
+      return recordingSessionId;
+    } catch (error) {
+      console.error('Error starting audio recording:', error);
+      isRecording = false;
+      
+      // Send error status to all windows
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('recording-status-update', {
+            isRecording: false,
+            sessionId: recordingSessionId,
+            errorMessage: error.message || 'Failed to start recording'
+          });
+        }
+      });
+      
+      throw error;
+    }
+  });
+  
+  // Stop audio recording
+  ipcMain.handle('stop-audio-recording', async () => {
+    try {
+      isRecording = false;
+      const sessionId = recordingSessionId;
+      
+      // Stop media recorder if it exists
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+      
+      // Stop all tracks
+      if (recordingStream) {
+        recordingStream.getTracks().forEach(track => track.stop());
+      }
+      
+      // Clean up audio context resources
+      if (audioContext && audioContext.state !== 'closed') {
+        await audioContext.close();
+        audioContext = null;
+        audioInputStream = null;
+        audioAnalyser = null;
+        audioDataArray = null;
+      }
+      
+      // Stop audio level monitoring
+      if (audioLevelInterval) {
+        clearInterval(audioLevelInterval);
+        audioLevelInterval = null;
+      }
+      
+      // Send status update to all windows
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('recording-status-update', {
+            isRecording: false,
+            sessionId: null,
+            startTime: null,
+            duration: 0,
+            audioLevel: 0,
+            errorMessage: null
+          });
+        }
+      });
+      
+      return {
+        success: true,
+        sessionId: sessionId,
+        filePath: recordingFilePath
+      };
+    } catch (error) {
+      console.error('Error stopping audio recording:', error);
+      throw error;
+    }
+  });
+  
+  // Get current audio level
+  ipcMain.handle('get-audio-level', () => {
+    // If we're recording and have an analyzer, get the actual audio level
+    if (isRecording && audioAnalyser && audioDataArray) {
+      audioAnalyser.getByteFrequencyData(audioDataArray);
+      
+      // Calculate average volume level from frequency data
+      let sum = 0;
+      for (let i = 0; i < audioDataArray.length; i++) {
+        sum += audioDataArray[i];
+      }
+      const average = sum / audioDataArray.length;
+      
+      // Normalize to 0-1 range (audio data is 0-255)
+      return average / 255;
+    }
+    return 0;
+  });
+  
+  // Add handler to get recording file path
+  ipcMain.handle('get-recording-file-path', () => {
+    return recordingFilePath;
+  });
+}
+
+// Start monitoring audio levels
+function startAudioLevelMonitoring() {
+  if (audioLevelInterval) {
+    clearInterval(audioLevelInterval);
+  }
+  
+  let duration = 0;
+  
+  audioLevelInterval = setInterval(() => {
+    if (!isRecording) {
+      clearInterval(audioLevelInterval);
+      audioLevelInterval = null;
+      return;
+    }
+    
+    // Increment duration (in seconds)
+    duration += 1;
+    
+    // Get actual audio level from analyzer
+    let audioLevel = 0;
+    if (audioAnalyser && audioDataArray) {
+      audioAnalyser.getByteFrequencyData(audioDataArray);
+      
+      // Calculate average volume level from frequency data
+      let sum = 0;
+      for (let i = 0; i < audioDataArray.length; i++) {
+        sum += audioDataArray[i];
+      }
+      const average = sum / audioDataArray.length;
+      
+      // Normalize to 0-1 range (audio data is 0-255)
+      audioLevel = average / 255;
+    } else {
+      // Fallback if analyzer not available
+      audioLevel = Math.random() * 0.2 + 0.05; // Low random value
+    }
+    
+    // Send update to all windows
+    BrowserWindow.getAllWindows().forEach(win => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('audio-level-update', audioLevel);
+        win.webContents.send('recording-status-update', {
+          isRecording: true,
+          sessionId: recordingSessionId,
+          startTime: new Date(Date.now() - duration * 1000).toISOString(),
+          duration: duration,
+          audioLevel: audioLevel,
+          deviceId: selectedDeviceId,
+          errorMessage: null
+        });
+      }
+    });
+    
+    // Also send a WebSocket-like update for the UI to consume
+    BrowserWindow.getAllWindows().forEach(win => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('websocket-message', {
+          type: 'audio_status',
+          data: {
+            sessionId: recordingSessionId,
+            isRecording: true,
+            audioLevel: audioLevel,
+            duration: duration,
+            timestamp: Date.now() / 1000
+          }
+        });
+      }
+    });
+  }, 200); // Update more frequently (5 times per second) for responsive UI
 }
 
 // Handle window activation

@@ -8,6 +8,29 @@ contextBridge.exposeInMainWorld(
     platform: process.platform,
     version: process.versions.electron,
     
+    // Audio device handling
+    getAudioDevices: () => ipcRenderer.invoke('get-audio-devices'),
+    startAudioRecording: (deviceId, options) => ipcRenderer.invoke('start-audio-recording', deviceId, options),
+    stopAudioRecording: () => ipcRenderer.invoke('stop-audio-recording'),
+    getAudioLevel: () => ipcRenderer.invoke('get-audio-level'),
+    getRecordingFilePath: () => ipcRenderer.invoke('get-recording-file-path'),
+    
+    // WebSocket-like functionality
+    sendWebSocketMessage: (type, data) => {
+      // This will be handled by the main process
+      ipcRenderer.send('websocket-message-send', { type, data });
+    },
+    addWebSocketMessageHandler: (callback) => {
+      const handler = (event, message) => callback(message);
+      ipcRenderer.on('websocket-message', handler);
+      return () => ipcRenderer.removeListener('websocket-message', handler);
+    },
+    getWebSocketStatus: () => ipcRenderer.invoke('get-websocket-status'),
+    recordingCompleted: (callback) => {
+      ipcRenderer.on('recording-completed', (event, data) => callback(data));
+    },
+    
+    
     // Floating windows
     createMiniTab: (bounds) => ipcRenderer.send('create-mini-tab', bounds),
     createStatusPanel: (bounds) => ipcRenderer.send('create-status-panel', bounds),
@@ -28,7 +51,16 @@ contextBridge.exposeInMainWorld(
     
     // Receive events from main process
     on: (channel, func) => {
-      const validChannels = ['toggle-mini-tab', 'toggle-status-panel', 'toggle-enhanced-mini-tab', 'global-shortcut'];
+      const validChannels = [
+        'toggle-mini-tab', 
+        'toggle-status-panel', 
+        'toggle-enhanced-mini-tab', 
+        'global-shortcut', 
+        'audio-level-update', 
+        'recording-status-update', 
+        'websocket-message', 
+        'recording-completed'
+      ];
       if (validChannels.includes(channel)) {
         ipcRenderer.on(channel, (event, ...args) => func(...args));
       }

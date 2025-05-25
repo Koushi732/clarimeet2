@@ -3,8 +3,8 @@ import mockApi, { mockAudioApi, mockSessionApi, mockTranscriptionApi, mockSummar
 
 // Environment variable or global setting to determine which API to use
 // In a real app, you might use process.env.REACT_APP_USE_MOCK_API or a similar approach
-// For now, we'll default to using the mock API
-const USE_MOCK_API = true;
+// Updated for production to use the real API
+const USE_MOCK_API = false;
 
 // Wrapper for all API services
 const api = USE_MOCK_API ? mockApi : realApi;

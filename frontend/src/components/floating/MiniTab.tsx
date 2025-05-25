@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Draggable from 'react-draggable';
 import { useSession } from '../../contexts/SessionContext';
 import { useAudio } from '../../contexts/AudioContext';
 import { isElectron, createMiniTab } from '../../utils/electronBridge';
+
+// Import panel components
+import { LiveSummaryPanel, AIChatbotPanel, NotebookPanel } from './panels';
 // Icons
 import {
   MicrophoneIcon,
@@ -25,9 +28,16 @@ const MiniTab = (): React.ReactElement => {
   const [isVisible, setIsVisible] = useState(true);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [activeTab, setActiveTab] = useState<'summary' | 'chat' | 'notes'>('summary');
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isHovering, setIsHovering] = useState(false);
+  const [isExpandedByHover, setIsExpandedByHover] = useState(false);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isNearEdge, setIsNearEdge] = useState(false);
   const { currentSession } = useSession();
   const { recordingStatus, startRecording, stopRecording, pauseRecording } = useAudio();
   const containerRef = useRef<HTMLDivElement>(null);
+  const dragNodeRef = useRef(null);
 
   // Update elapsed time during recording
   useEffect(() => {
@@ -93,19 +103,98 @@ const MiniTab = (): React.ReactElement => {
     }
   };
 
+  // Check if component is near window edge for snap behavior
+  const checkEdgeProximity = useCallback((x: number, y: number) => {
+    if (!containerRef.current) return false;
+    
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+    const rect = containerRef.current.getBoundingClientRect();
+    const edgeThreshold = 20; // pixels from edge to activate snap
+    
+    const isNearRightEdge = windowWidth - (x + rect.width) < edgeThreshold;
+    const isNearLeftEdge = x < edgeThreshold;
+    const isNearTopEdge = y < edgeThreshold;
+    const isNearBottomEdge = windowHeight - (y + rect.height) < edgeThreshold;
+    
+    return isNearRightEdge || isNearLeftEdge || isNearTopEdge || isNearBottomEdge;
+  }, []);
+  
+  // Handle drag stop - now just tracks position without enforcing boundaries
+  const handleDragStop = useCallback((e, data) => {
+    const { x, y } = data;
+    setPosition({ x, y });
+  }, []);
+  
+  // Handle drag to keep track of position and check edge proximity
+  const handleDrag = useCallback((e, data) => {
+    const { x, y } = data;
+    setPosition({ x, y });
+    setIsNearEdge(checkEdgeProximity(x, y));
+  }, [checkEdgeProximity]);
+  
+  // Effect to handle window resize events - now just tracks window size changes
+  useEffect(() => {
+    const handleResize = () => {
+      // Just update edge proximity check on resize
+      if (containerRef.current) {
+        const { x, y } = position;
+        setIsNearEdge(checkEdgeProximity(x, y));
+      }
+    };
+    
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [position, checkEdgeProximity]);
+  
   if (!isVisible) return null;
 
   return (
-    <DraggableComponent handle=".drag-handle" bounds="parent">
+    <DraggableComponent 
+      handle=".drag-handle" 
+      position={position}
+      onStop={handleDragStop}
+      onDrag={handleDrag}
+      nodeRef={dragNodeRef}>
       <motion.div
         ref={containerRef}
-        className="mini-tab shadow-lg rounded-lg bg-white dark:bg-dark-700 border border-gray-200 dark:border-dark-600 overflow-hidden"
+        className={`mini-tab shadow-lg rounded-lg bg-white dark:bg-dark-700 border border-gray-200 dark:border-dark-600 overflow-hidden ${isNearEdge ? 'border-primary-500 dark:border-primary-400' : ''}`}
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
+        onMouseEnter={() => {
+          setIsHovering(true);
+          // Expand after a short delay to prevent accidental expansions
+          hoverTimeoutRef.current = setTimeout(() => {
+            setIsExpandedByHover(true);
+            setIsCollapsed(false);
+          }, 200);
+        }}
+        onMouseLeave={() => {
+          setIsHovering(false);
+          // Clear any pending hover timeout
+          if (hoverTimeoutRef.current) {
+            clearTimeout(hoverTimeoutRef.current);
+            hoverTimeoutRef.current = null;
+          }
+          // Collapse after leaving, but only if it was expanded by hover
+          if (isExpandedByHover) {
+            setTimeout(() => {
+              setIsExpandedByHover(false);
+              setIsCollapsed(true);
+            }, 500); // Longer delay to give user time to move cursor back
+          }
+        }}
+        style={{ 
+          zIndex: 9999,
+          boxShadow: isHovering ? '0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)' : undefined
+        }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between pb-2 border-b border-gray-200 dark:border-dark-600 drag-handle cursor-move">
+        <div 
+          className="flex items-center justify-between py-2 px-3 border-b border-gray-200 dark:border-dark-600 drag-handle cursor-move bg-gray-50 dark:bg-dark-800 transition-colors duration-200"
+          ref={dragNodeRef}
+        >
           <div className="flex items-center">
             <MicrophoneIcon className="h-5 w-5 text-primary-500 mr-2" />
             <h3 className="text-sm font-medium">Clarimeet</h3>
@@ -121,7 +210,11 @@ const MiniTab = (): React.ReactElement => {
               </button>
             )}
             <button
-              onClick={() => setIsCollapsed(!isCollapsed)}
+              onClick={() => {
+                const newCollapsedState = !isCollapsed;
+                setIsCollapsed(newCollapsedState);
+                setIsExpandedByHover(false); // Manual click overrides hover behavior
+              }}
               className="p-1 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
               {isCollapsed ? (
@@ -139,6 +232,66 @@ const MiniTab = (): React.ReactElement => {
           </div>
         </div>
 
+        {/* Tabs */}
+        {!isCollapsed && (
+          <div className="flex border-b border-gray-200 dark:border-dark-600">
+            <button
+              onClick={() => setActiveTab('summary')}
+              className={`flex-1 py-2 text-xs font-medium transition-colors duration-150 relative ${activeTab === 'summary'
+                ? 'text-primary-600 dark:text-primary-400'
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+              }`}
+            >
+              Summary
+              {activeTab === 'summary' && (
+                <motion.div
+                  layoutId="activeTabIndicator"
+                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500 dark:bg-primary-400"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.2 }}
+                />
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('chat')}
+              className={`flex-1 py-2 text-xs font-medium transition-colors duration-150 relative ${activeTab === 'chat'
+                ? 'text-primary-600 dark:text-primary-400'
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+              }`}
+            >
+              AI Chat
+              {activeTab === 'chat' && (
+                <motion.div
+                  layoutId="activeTabIndicator"
+                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500 dark:bg-primary-400"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.2 }}
+                />
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('notes')}
+              className={`flex-1 py-2 text-xs font-medium transition-colors duration-150 relative ${activeTab === 'notes'
+                ? 'text-primary-600 dark:text-primary-400'
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+              }`}
+            >
+              Notes
+              {activeTab === 'notes' && (
+                <motion.div
+                  layoutId="activeTabIndicator"
+                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500 dark:bg-primary-400"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.2 }}
+                />
+              )}
+            </button>
+          </div>
+        )}
+        
         {/* Content */}
         <AnimatePresenceComponent>
           {!isCollapsed && (
@@ -146,11 +299,11 @@ const MiniTab = (): React.ReactElement => {
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden"
+              transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1.0] }} // Using cubic-bezier for smoother animation
+              className="overflow-hidden p-3"
             >
-              {/* Session info */}
-              <div className="mt-3">
+              {/* Session info - always visible at the top */}
+              <div className="mb-3">
                 <div className="flex justify-between items-center">
                   <div className="text-xs text-gray-500 dark:text-gray-400">
                     {recordingStatus?.isRecording
@@ -175,35 +328,70 @@ const MiniTab = (): React.ReactElement => {
                 {recordingStatus?.isRecording && (
                   <div className="mt-2">{renderAudioLevel()}</div>
                 )}
-
-                {/* Latest transcription */}
-                {currentSession?.currentTranscriptions?.length > 0 && (
-                  <div className="mt-3 p-2 bg-gray-50 dark:bg-dark-600 rounded-md text-xs max-h-20 overflow-y-auto">
-                    <div className="flex items-start space-x-1">
-                      <DocumentTextIcon className="h-4 w-4 text-gray-500 dark:text-gray-400 mt-0.5 flex-shrink-0" />
-                      <div>
-                        {currentSession.currentTranscriptions[
-                          currentSession.currentTranscriptions.length - 1
-                        ].text}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Summary snippet */}
-                {currentSession?.currentSummaries?.length > 0 && (
-                  <div className="mt-2 p-2 bg-primary-50 dark:bg-dark-800 rounded-md text-xs max-h-20 overflow-y-auto">
-                    <div className="text-xs font-medium text-primary-700 dark:text-primary-400 mb-1">
-                      Latest Summary
-                    </div>
-                    <div>
-                      {currentSession.currentSummaries[
-                        currentSession.currentSummaries.length - 1
-                      ].text}
-                    </div>
-                  </div>
-                )}
               </div>
+              
+              {/* Tab Content */}
+              <AnimatePresenceComponent mode="wait">
+                {activeTab === 'summary' && (
+                  <motion.div
+                    key="summary"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    {currentSession?.session ? (
+                      <LiveSummaryPanel session={currentSession} />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-4 text-gray-400 dark:text-gray-500">
+                        <DocumentTextIcon className="h-10 w-10 mb-2 opacity-50" />
+                        <p className="text-sm">No active session</p>
+                        <p className="text-xs mt-1">Start recording to see live summaries</p>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+                
+                {activeTab === 'chat' && (
+                  <motion.div
+                    key="chat"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    {currentSession?.session ? (
+                      <AIChatbotPanel session={currentSession} />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-4 text-gray-400 dark:text-gray-500">
+                        <DocumentTextIcon className="h-10 w-10 mb-2 opacity-50" />
+                        <p className="text-sm">No active session</p>
+                        <p className="text-xs mt-1">Start recording to chat with AI</p>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+                
+                {activeTab === 'notes' && (
+                  <motion.div
+                    key="notes"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    {currentSession?.session ? (
+                      <NotebookPanel session={currentSession} />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-4 text-gray-400 dark:text-gray-500">
+                        <DocumentTextIcon className="h-10 w-10 mb-2 opacity-50" />
+                        <p className="text-sm">No active session</p>
+                        <p className="text-xs mt-1">Start recording to take notes</p>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresenceComponent>
             </motion.div>
           )}
         </AnimatePresenceComponent>

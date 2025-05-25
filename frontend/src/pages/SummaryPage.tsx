@@ -45,20 +45,31 @@ const SummaryPage = (): React.ReactElement => {
     alert('Summary copied to clipboard');
   };
   
-  // Group summaries by type
+  // Group summaries by type with optimized performance for large sessions
   const groupedSummaries = React.useMemo(() => {
-    if (!hasActiveSession || !currentSession.currentSummaries.length) {
+    if (!hasActiveSession || !currentSession?.currentSummaries?.length) {
       return {};
     }
     
-    return currentSession.currentSummaries.reduce<Record<string, Summary[]>>((acc, summary) => {
-      if (!acc[summary.summaryType]) {
-        acc[summary.summaryType] = [];
+    // Improved performance for large datasets
+    const result: Record<string, Summary[]> = {};
+    const summaries = currentSession.currentSummaries;
+    
+    // Pre-allocate estimated size for common summary types
+    ['overall', 'key_points', 'action_items', 'decisions'].forEach(type => {
+      result[type] = [];
+    });
+    
+    // Single-pass grouping
+    for (let i = 0; i < summaries.length; i++) {
+      const summary = summaries[i];
+      if (!result[summary.summaryType]) {
+        result[summary.summaryType] = [];
       }
-      
-      acc[summary.summaryType].push(summary);
-      return acc;
-    }, {}) as Record<string, Summary[]>;
+      result[summary.summaryType].push(summary);
+    }
+    
+    return result;
   }, [hasActiveSession, currentSession?.currentSummaries]);
   
   // Format time

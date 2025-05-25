@@ -12,7 +12,7 @@ interface UseMockWebSocketOptions {
   onError?: (error: Event) => void;
 }
 
-// This mocks the real useWebSocket hook without actually connecting to a WebSocket server
+// This is now an enhanced mock WebSocket that integrates with Electron
 export const useMockWebSocket = (
   url: string,
   options: UseMockWebSocketOptions = {}
@@ -28,26 +28,50 @@ export const useMockWebSocket = (
   const messageHandlers = useRef<Map<string, Set<MessageHandler>>>(new Map());
   const mockSessionId = useRef<string>(url.split('/').pop() || '');
   const mockIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const electronHandlerRemoveRef = useRef<(() => void) | null>(null);
 
-  // Simulate connect
+  // Connect using Electron when available
   const connect = useCallback(() => {
     console.log('[MOCK] Connecting to:', url);
     setStatus('connecting');
     
-    // Simulate connection delay
-    setTimeout(() => {
+    // Set up with real connection if Electron is available
+    if (window.electron) {
+      // Set up handler for WebSocket-like messages from Electron
+      if (electronHandlerRemoveRef.current) {
+        electronHandlerRemoveRef.current();
+      }
+      
+      electronHandlerRemoveRef.current = window.electron.addWebSocketMessageHandler((message: any) => {
+        setLastMessage(message);
+        
+        // Process message using handlers
+        if (message && message.type && messageHandlers.current.has(message.type)) {
+          messageHandlers.current.get(message.type)?.forEach(handler => {
+            handler(message.data);
+          });
+        }
+      });
+      
       setStatus('open');
       if (onOpen) onOpen();
-      console.log('[MOCK] WebSocket connected');
-      
-      // Start sending mock messages if it's a session WebSocket
-      if (url.includes('/api/transcribe/') || url.includes('/api/summarize/')) {
-        startMockMessages();
-      }
-    }, 500);
+      console.log('[ELECTRON-WS] WebSocket connected');
+    } else {
+      // Fallback to simulated connection
+      setTimeout(() => {
+        setStatus('open');
+        if (onOpen) onOpen();
+        console.log('[MOCK] WebSocket connected');
+        
+        // Start sending mock messages if it's a session WebSocket
+        if (url.includes('/api/transcribe/') || url.includes('/api/summarize/')) {
+          startMockMessages();
+        }
+      }, 500);
+    }
   }, [url, onOpen]);
 
-  // Send mock messages periodically to simulate real-time updates
+  // Send simulated messages periodically when not using Electron
   const startMockMessages = useCallback(() => {
     if (mockIntervalRef.current) {
       clearInterval(mockIntervalRef.current);
