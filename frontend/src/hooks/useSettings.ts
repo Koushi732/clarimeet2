@@ -4,20 +4,28 @@ export interface Settings {
   theme: 'light' | 'dark' | 'system';
   language: string;
   transcriptionModel: string;
+  transcriptionLanguage: string;
   summarizationModel: string;
   autoSave: boolean;
   autoTranscribe: boolean;
   autoSummarize: boolean;
+  enableRealTimeAudio: boolean;
+  apiBaseUrl?: string;
+  apiBaseWebSocketUrl?: string;
 }
 
 const defaultSettings: Settings = {
   theme: 'system',
   language: 'en',
   transcriptionModel: 'whisper-small',
+  transcriptionLanguage: 'en',
   summarizationModel: 'bart-large-cnn',
   autoSave: true,
   autoTranscribe: true,
   autoSummarize: true,
+  enableRealTimeAudio: true,
+  apiBaseUrl: 'http://localhost:8000',
+  apiBaseWebSocketUrl: 'ws://localhost:8000',
 };
 
 export const useSettings = () => {

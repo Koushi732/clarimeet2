@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { ChatBubbleLeftRightIcon, PaperAirplaneIcon, ArrowPathIcon } from '@heroicons/react/24/solid';
+import axios from 'axios';
+import { ChatBubbleLeftRightIcon, PaperAirplaneIcon, ArrowPathIcon, Cog6ToothIcon } from '@heroicons/react/24/solid';
 
 interface AIChatbotPanelProps {
   session: any; // Using any for now, should be properly typed with your session interface
@@ -11,12 +12,16 @@ interface Message {
   text: string;
   sender: 'user' | 'ai';
   timestamp: number;
+  contextSource?: string;
+  confidence?: number;
 }
 
 const AIChatbotPanel: React.FC<AIChatbotPanelProps> = ({ session }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isLocalProcessing, setIsLocalProcessing] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   
@@ -41,6 +46,7 @@ const AIChatbotPanel: React.FC<AIChatbotPanelProps> = ({ session }) => {
   // Function to handle sending a message
   const handleSendMessage = async () => {
     if (!inputText.trim() || !session?.session) return;
+    setError(null);
     
     // Add user message
     const userMessage: Message = {
@@ -54,34 +60,109 @@ const AIChatbotPanel: React.FC<AIChatbotPanelProps> = ({ session }) => {
     setInputText('');
     setIsLoading(true);
     
-    // In a real implementation, you would send this to your backend API
-    // and get a response from the AI. This is a simplified version.
-    
-    setTimeout(() => {
-      // Generate context-aware response based on session data
-      let responseText = 'I\'m processing your request...';
-      
-      if (session?.currentTranscriptions?.length > 0) {
-        const recentTranscription = session.currentTranscriptions[session.currentTranscriptions.length - 1].text;
-        responseText = `Based on the recent discussion about "${recentTranscription.substring(0, 30)}...", I think I can help with that. What specific information are you looking for?`;
+    try {
+      if (isLocalProcessing) {
+        // Local processing mode for development/testing
+        await processMessageLocally(userMessage.text);
+      } else {
+        // Production API call
+        await processMessageWithAPI(userMessage.text);
       }
+    } catch (err) {
+      console.error('Error processing message:', err);
+      setError('Failed to get a response. Please try again.');
       
-      if (session?.currentSummaries?.length > 0) {
-        const recentSummary = session.currentSummaries[session.currentSummaries.length - 1].text;
-        responseText = `According to the latest summary, ${recentSummary.substring(0, 100)}... Does this answer your question?`;
-      }
-      
-      // Add AI response
-      const aiMessage: Message = {
+      // Fallback response in case of error
+      const errorMessage: Message = {
         id: `ai-${Date.now()}`,
-        text: responseText,
+        text: 'I encountered an error processing your request. Please try again or check your connection.',
         sender: 'ai',
         timestamp: Date.now()
       };
       
-      setMessages(prev => [...prev, aiMessage]);
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
+  };
+  
+  // Process message with local logic (for development/testing)
+  const processMessageLocally = async (userText: string) => {
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Generate context-aware response based on session data
+    let responseText = 'I\'m analyzing your request...';
+    let contextSource = '';
+    
+    // Use transcriptions if available
+    if (session?.currentTranscriptions?.length > 0) {
+      const recentTranscriptions = session.currentTranscriptions
+        .slice(-3) // Get last 3 transcriptions
+        .map(t => t.text)
+        .join(' ');
+      
+      // Look for keywords in the user's question and the transcriptions
+      const userKeywords = userText.toLowerCase().split(' ');
+      const relevantParts = recentTranscriptions.split('.').filter(sentence => 
+        userKeywords.some(keyword => 
+          keyword.length > 3 && sentence.toLowerCase().includes(keyword)
+        )
+      );
+      
+      if (relevantParts.length > 0) {
+        responseText = `Based on the discussion, ${relevantParts.join('. ')}\n\nDoes this help answer your question?`;
+        contextSource = 'transcription';
+      }
+    }
+    
+    // Use summaries if available and no relevant transcription was found
+    if ((!contextSource || contextSource === '') && session?.currentSummaries?.length > 0) {
+      const recentSummary = session.currentSummaries[session.currentSummaries.length - 1].text;
+      responseText = `According to the latest summary: ${recentSummary}\n\nIs there anything specific you'd like me to elaborate on?`;
+      contextSource = 'summary';
+    }
+    
+    // If no context was found, provide a generic response
+    if (!contextSource) {
+      responseText = `I don't have enough context from the current session to provide a specific answer. Could you provide more details about what you're looking for?`;
+    }
+    
+    // Add AI response
+    const aiMessage: Message = {
+      id: `ai-${Date.now()}`,
+      text: responseText,
+      sender: 'ai',
+      timestamp: Date.now(),
+      contextSource,
+      confidence: contextSource ? 0.85 : 0.5
+    };
+    
+    setMessages(prev => [...prev, aiMessage]);
+  };
+  
+  // Process message with backend API (for production)
+  const processMessageWithAPI = async (userText: string) => {
+    try {
+      const response = await axios.post(`/api/chat/${session.session.id}`, {
+        message: userText,
+        useContext: true
+      });
+      
+      const aiMessage: Message = {
+        id: `ai-${Date.now()}`,
+        text: response.data.message,
+        sender: 'ai',
+        timestamp: Date.now(),
+        contextSource: response.data.contextSource,
+        confidence: response.data.confidence || 0.7
+      };
+      
+      setMessages(prev => [...prev, aiMessage]);
+    } catch (error) {
+      console.error('API error:', error);
+      throw error; // Re-throw to be handled by the caller
+    }
   };
 
   // Handle keyboard submit
@@ -108,12 +189,24 @@ const AIChatbotPanel: React.FC<AIChatbotPanelProps> = ({ session }) => {
         <h3 className="text-sm font-medium text-primary-700 dark:text-primary-400">
           AI Chatbot
         </h3>
-        <button 
-          onClick={() => chatInputRef.current?.focus()}
-          className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-300"
-        >
-          Ask a question
-        </button>
+        <div className="flex space-x-1">
+          {/* Toggle processing mode (visible only in development) */}
+          {process.env.NODE_ENV === 'development' && (
+            <button
+              onClick={() => setIsLocalProcessing(!isLocalProcessing)}
+              title={isLocalProcessing ? "Using local processing" : "Using API"}
+              className="text-xs p-1 rounded-full bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-300"
+            >
+              <Cog6ToothIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button 
+            onClick={() => chatInputRef.current?.focus()}
+            className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-300"
+          >
+            Ask a question
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto max-h-48 bg-gray-50 dark:bg-dark-700 rounded-md p-2 text-sm mb-2">
@@ -147,6 +240,12 @@ const AIChatbotPanel: React.FC<AIChatbotPanelProps> = ({ session }) => {
                 <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
               </div>
             </div>
+          </div>
+        )}
+        
+        {error && (
+          <div className="text-center p-2 text-red-500 text-xs mt-2 mb-2">
+            {error}
           </div>
         )}
         

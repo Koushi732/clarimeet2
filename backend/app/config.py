@@ -94,6 +94,25 @@ class Settings(BaseSettings):
     # Linux settings
     LINUX_PULSE_SOURCE: Optional[str] = Field(default=None, env="LINUX_PULSE_SOURCE")
     
+    # API Keys
+    OPENAI_API_KEY: str = Field(default="your_openai_api_key", env="OPENAI_API_KEY")
+    HUGGINGFACE_API_KEY: str = Field(default="your_huggingface_api_key", env="HUGGINGFACE_API_KEY")
+    TEXTRAZOR_API_KEY: str = Field(default="your_textrazor_api_key", env="TEXTRAZOR_API_KEY")
+    COHERE_API_KEY: str = Field(default="your_cohere_api_key", env="COHERE_API_KEY")
+    DEEPGRAM_API_KEY: str = Field(default="your_deepgram_api_key", env="DEEPGRAM_API_KEY")
+    ASSEMBLYAI_API_KEY: str = Field(default="your_assemblyai_api_key", env="ASSEMBLYAI_API_KEY")
+    
+    # Database settings (additional)
+    SUPABASE_URL: str = Field(default="your_supabase_url", env="SUPABASE_URL")
+    SUPABASE_KEY: str = Field(default="your_supabase_key", env="SUPABASE_KEY")
+    
+    # Service provider settings
+    DEFAULT_TRANSCRIPTION_PROVIDER: str = Field(default="openai", env="DEFAULT_TRANSCRIPTION_PROVIDER")
+    DEFAULT_SUMMARIZATION_PROVIDER: str = Field(default="huggingface", env="DEFAULT_SUMMARIZATION_PROVIDER")
+    DEFAULT_CHATBOT_PROVIDER: str = Field(default="openai", env="DEFAULT_CHATBOT_PROVIDER")
+    DEFAULT_KEYWORD_PROVIDER: str = Field(default="textrazor", env="DEFAULT_KEYWORD_PROVIDER")
+    USE_CLOUD_STORAGE: bool = Field(default=False, env="USE_CLOUD_STORAGE")
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

@@ -11,6 +11,7 @@ interface ElectronAPI {
   stopAudioRecording: () => Promise<{success: boolean; sessionId: string; filePath: string}>;
   getAudioLevel: () => Promise<number>;
   getRecordingFilePath: () => Promise<string>;
+  getSystemAudio: () => Promise<MediaStream>; // System audio capture for loopback recording
   
   // WebSocket-like functionality
   sendWebSocketMessage: (type: string, data: any) => void;

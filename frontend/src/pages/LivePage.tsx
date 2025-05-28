@@ -5,7 +5,15 @@ import { useAudio } from '../contexts/AudioContext';
 import { useSession } from '../contexts/SessionContext';
 import { useSettingsContext } from '../contexts/SettingsContext';
 import { useWebSocketBridge, WebSocketMessageType, WebSocketMessage } from '../contexts/WebSocketContextBridge';
+import { toast } from 'react-hot-toast';
+import SimpleFloatingPanel from '../components/floating/SimpleFloatingPanel';
 import AudioVisualizer from '../components/ui/AudioVisualizer';
+import SpeakerDiarization from '../components/transcription/SpeakerDiarization';
+import LanguageSelector from '../components/transcription/LanguageSelector';
+import WaveformVisualizer from '../components/audio/WaveformVisualizer';
+import FloatingTranscriptionPanel from '../components/floating/FloatingTranscriptionPanel';
+import FloatingSummaryPanel from '../components/floating/FloatingSummaryPanel';
+import FloatingChatbotPanel from '../components/floating/FloatingChatbotPanel';
 import { createEnhancedMiniTab, createMiniTab, isElectron } from '../utils/electronBridge';
 // Icons
 import {
@@ -16,6 +24,8 @@ import {
   CheckCircleIcon,
   ExclamationCircleIcon,
   ChartBarIcon as WaveformIcon, // Using ChartBarIcon as a replacement for WaveformIcon
+  GlobeAltIcon,
+  UserGroupIcon
 } from '@heroicons/react/24/solid';
 
 const { useState, useEffect, useRef, useCallback } = React;
@@ -89,25 +99,26 @@ const LivePage = (): React.ReactElement => {
         // If we have a session ID, the recording started successfully
         console.log(`Recording started with session ID: ${sessionId}`);
         
-        // Always show MiniTab when recording starts
+        // Show the enhanced MiniTab with core features when recording starts
         if (isElectron()) {
           // Position at the top-right corner of the screen
           const screenWidth = window.screen.width;
-          // First try to create the MiniTab
-          createMiniTab({
-            x: screenWidth - 320,
+          
+          // Create the enhanced MiniTab with Live Summary and Chatbot panels
+          createEnhancedMiniTab({
+            x: screenWidth - 340,
             y: 50,
-            width: 300,
-            height: 150
+            width: 320,
+            height: 500 // Increased height to accommodate new features
           });
           
-          // Then create the enhanced version with more panels
-          createEnhancedMiniTab({
-            x: screenWidth - 370,
-            y: 100,
-            width: 320,
-            height: 420
-          });
+          // Let the user know about the floating panel
+          console.log('Floating panel created with Live Summary, AI Chatbot, and Speaker Diarization');
+        }
+        
+        // Auto-navigate to the currently recording session
+        if (currentSession && currentSession.session && currentSession.session.id !== sessionId) {
+          setActiveSession(sessionId);
         }
       }
     } catch (error) {
@@ -119,18 +130,24 @@ const LivePage = (): React.ReactElement => {
   
   // Stop recording handler
   const handleStopRecording = async () => {
-    if (!currentSession?.session?.id) {
-      console.error('No active session to stop');
+    // Check both recordingStatus and currentSession to determine active session ID
+    const sessionId = recordingStatus?.sessionId || currentSession?.session?.id;
+    
+    if (!sessionId) {
+      console.warn('No active recording session found to stop');
       return;
     }
     
+    console.log(`Stopping recording for session ID: ${sessionId}`);
     setIsStopping(true);
     
     try {
-      const success = await stopRecording(currentSession.session.id);
+      const success = await stopRecording(sessionId);
       
       if (success) {
         console.log('Recording stopped successfully');
+      } else {
+        console.warn('Failed to stop recording properly');
       }
     } catch (error) {
       console.error('Error stopping recording:', error);
@@ -139,8 +156,41 @@ const LivePage = (): React.ReactElement => {
     }
   };
   
-  // WebSocket integration for real-time updates
-  const { sendMessage, lastMessage, connectionStatus } = useWebSocketBridge();
+  // WebSocket related
+  const { 
+    sendMessage, 
+    connectionStatus, 
+    addMessageHandler, 
+    lastMessage, 
+    connectToSession,
+    reconnect,
+    connected,
+    connectionError
+  } = useWebSocketBridge();
+  
+  // Show connection status notifications
+  useEffect(() => {
+    if (connectionError) {
+      toast.error(`WebSocket connection error: ${connectionError}`, {
+        duration: 5000,
+        position: 'bottom-right'
+      });
+    }
+  }, [connectionError]);
+  
+  // Add reconnection logic
+  useEffect(() => {
+    if (connectionStatus === 'closed' && recordingStatus?.isRecording) {
+      toast.error('WebSocket connection lost. Attempting to reconnect...', {
+        duration: 3000,
+        position: 'bottom-right'
+      });
+      
+      // Attempt to reconnect
+      reconnect();
+    }
+  }, [connectionStatus, recordingStatus?.isRecording, reconnect]);
+  
   const { settings } = useSettingsContext();
   const navigate = useNavigate();
   
@@ -208,9 +258,9 @@ const LivePage = (): React.ReactElement => {
   
   // Send heartbeat to keep WebSocket connection alive
   useEffect(() => {
-    if (recordingStatus?.isRecording && connectionStatus === 'Connected') {
+    if (recordingStatus?.isRecording && connectionStatus === 'open') {
       const interval = setInterval(() => {
-        sendMessage(JSON.stringify({ type: 'heartbeat' }));
+        sendMessage({ type: 'heartbeat' });
       }, 30000); // Every 30 seconds
       
       return () => clearInterval(interval);
@@ -241,6 +291,19 @@ const LivePage = (): React.ReactElement => {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      {/* Floating panels for real-time transcription, summary, and AI chatbot */}
+      {/* Always show SimpleFloatingPanel as a reliable fallback */}
+      <SimpleFloatingPanel />
+      
+      {/* Original panels only shown when WebSocket is connected */}
+      {connected && (
+        <>
+          {/* <FloatingTranscriptionPanel />
+          <FloatingSummaryPanel />
+          <FloatingChatbotPanel /> */}
+        </>
+      )}
+      
       <motion.div
         className="mb-8"
         initial={{ opacity: 0, y: -20 }}
@@ -378,6 +441,17 @@ const LivePage = (): React.ReactElement => {
                   </div>
                 </div>
                 
+                <div>
+                  <label className="label flex items-center">
+                    <GlobeAltIcon className="h-4 w-4 mr-1 text-gray-500" />
+                    Transcription Language
+                  </label>
+                  <LanguageSelector 
+                    disabled={recordingStatus?.isRecording}
+                    onLanguageChange={(lang) => console.log(`Language changed to: ${lang}`)}
+                  />
+                </div>
+                
                 {/* Audio visualization */}
                 <div className="mt-4">
                   <AudioVisualizer 
@@ -488,26 +562,74 @@ const LivePage = (): React.ReactElement => {
         </div>
       </div>
       
-      {/* Live transcription */}
+      {/* Live transcription and speaker diarization */}
       {currentSession?.currentTranscriptions && currentSession.currentTranscriptions.length > 0 && (
         <div className="mt-8">
-          <h2 className="text-xl font-semibold mb-4">Live Transcription</h2>
-          
-          <div className="card p-6 max-h-96 overflow-y-auto">
-            {currentSession.currentTranscriptions.map((transcription, index) => (
-              <div key={transcription.id} className="mb-4 last:mb-0">
-                <div className="flex items-center text-sm text-gray-500 dark:text-gray-400 mb-1">
-                  <span className="font-mono">{formatTime(transcription.timestamp)}</span>
-                  {transcription.speaker && (
-                    <span className="ml-2 bg-gray-100 dark:bg-dark-600 px-2 py-0.5 rounded">
-                      {transcription.speaker}
-                    </span>
-                  )}
-                </div>
-                <p className="text-gray-800 dark:text-gray-200">{transcription.text}</p>
+          <div className="flex flex-col lg:flex-row gap-6">
+            {/* Transcription column */}
+            <div className="flex-1">
+              <h2 className="text-xl font-semibold mb-4">Live Transcription</h2>
+              
+              <div className="card p-6 max-h-96 overflow-y-auto">
+                {currentSession.currentTranscriptions.map((transcription, index) => (
+                  <div key={transcription.id} className="mb-4 last:mb-0">
+                    <div className="flex items-center text-sm text-gray-500 dark:text-gray-400 mb-1">
+                      <span className="font-mono">{formatTime(transcription.timestamp)}</span>
+                      {transcription.speaker && (
+                        <span className="ml-2 bg-gray-100 dark:bg-dark-600 px-2 py-0.5 rounded">
+                          {transcription.speaker}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-gray-800 dark:text-gray-200">{transcription.text}</p>
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
+
+            {/* Speaker Diarization */}
+            <div className="lg:w-1/3">
+              <h2 className="text-xl font-semibold mb-4 flex items-center">
+                <UserGroupIcon className="h-5 w-5 mr-2" />
+                Speaker Analysis
+              </h2>
+              
+              <div className="card p-6">
+                <SpeakerDiarization 
+                  segments={currentSession.currentTranscriptions.map(t => ({
+                    id: t.id,
+                    text: t.text,
+                    timestamp: t.timestamp,
+                    speakerId: t.speaker,
+                    confidence: t.confidence
+                  }))}
+                  onSegmentUpdate={(segment) => {
+                    console.log('Speaker segment updated:', segment);
+                  }}
+                />
+              </div>
+            </div>
           </div>
+          
+          {/* Audio waveform visualization if we have audio data */}
+          {currentSession?.session?.audioFileUrl && (
+            <div className="mt-8">
+              <h2 className="text-xl font-semibold mb-4 flex items-center">
+                <WaveformIcon className="h-5 w-5 mr-2" />
+                Audio Waveform
+              </h2>
+              
+              <div className="card p-4">
+                <WaveformVisualizer 
+                  audioUrl={currentSession.session.audioFileUrl}
+                  height={80}
+                  onPositionChange={(pos) => {
+                    console.log(`Audio position: ${formatTime(pos)}`);
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

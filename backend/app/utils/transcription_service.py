@@ -25,6 +25,23 @@ except ImportError:
     WHISPER_AVAILABLE = False
     logging.warning("Whisper is not installed. Using fallback transcription method.")
 
+# Try to import deepgram for alternative transcription
+try:
+    import asyncio
+    from deepgram import Deepgram
+    DEEPGRAM_AVAILABLE = True
+except ImportError:
+    DEEPGRAM_AVAILABLE = False
+    logging.warning("Deepgram is not installed. Using primary transcription method.")
+
+# Try to import assemblyai for alternative transcription
+try:
+    import assemblyai as aai
+    ASSEMBLYAI_AVAILABLE = True
+except ImportError:
+    ASSEMBLYAI_AVAILABLE = False
+    logging.warning("AssemblyAI is not installed. Using primary transcription method.")
+
 # Check for GPU availability
 GPU_AVAILABLE = TORCH_AVAILABLE and torch.cuda.is_available()
 if GPU_AVAILABLE:
@@ -41,6 +58,10 @@ transcription_status = {}
 
 # Transcription models cache
 models_cache = {}
+
+# Real-time audio processing
+audio_chunk_queues = {}
+audio_processors = {}
 
 def _load_whisper_model(model_name: str):
     """Load a Whisper model."""
@@ -88,7 +109,7 @@ def _load_vosk_model(model_name: str):
         logger.error(f"Error loading Vosk model: {e}")
         return None
 
-def _transcribe_with_whisper(audio_path: str, model_name: str = "small", language: str = "en") -> List[Dict[str, Any]]:
+async def _transcribe_with_whisper(audio_path: str, model_name: str = "small", language: str = "en") -> List[Dict[str, Any]]:
     """Transcribe audio with Whisper."""
     try:
         # Load model
@@ -96,12 +117,16 @@ def _transcribe_with_whisper(audio_path: str, model_name: str = "small", languag
         if not model:
             return []
         
-        # Transcribe
-        result = model.transcribe(
-            audio_path,
-            language=language,
-            verbose=False,
-            word_timestamps=True
+        # Run transcription in a thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: model.transcribe(
+                audio_path,
+                language=language,
+                verbose=False,
+                word_timestamps=True
+            )
         )
         
         segments = []
@@ -218,35 +243,196 @@ def _save_transcriptions(segments: List[Dict[str, Any]], session_id: str, db) ->
         logger.error(f"Error saving transcriptions: {e}")
         return False
 
-def _transcribe_audio_stream(session_id: str, audio_queue: queue.Queue, model: str, language: str):
+async def _transcribe_audio_stream(session_id: str, audio_queue: queue.Queue, model: str, language: str):
     """Transcribe audio stream in real-time."""
     try:
-        # Set status
+        # Update status
         transcription_status[session_id] = {
             "status": "transcribing",
             "model": model,
             "language": language,
-            "last_update": time.time()
+            "last_update": time.time(),
+            "chunks_processed": 0,
+            "current_buffer": []
         }
         
-        # TODO: Implement real-time transcription
-        # This is a complex task that requires:
-        # 1. Buffering audio chunks
-        # 2. Detecting speech vs. silence
-        # 3. Sending speech chunks to transcription model
-        # 4. Handling overlapping transcriptions
+        # Setup transcription buffer for accumulating chunks
+        buffer_size = 12  # Number of chunks to accumulate before processing
+        audio_buffer = []
         
-        # For now, we'll use a simple approach of accumulating audio and transcribing chunks
+        # Register the queue for this session
+        audio_chunk_queues[session_id] = audio_queue
         
-        # Clean up
-        transcription_status[session_id]["status"] = "stopped"
-        
+        # Process audio stream
+        while True:
+            try:
+                # Get audio chunk from queue
+                audio_chunk = audio_queue.get(timeout=1.0)
+                
+                # Check for termination signal
+                if audio_chunk is None:
+                    logger.info(f"Received termination signal for session {session_id}")
+                    
+                    # Process any remaining audio in buffer before terminating
+                    if audio_buffer:
+                        # Process the accumulated buffer
+                        await _process_audio_buffer(session_id, audio_buffer, model, language)
+                    
+                    break
+                
+                # Add chunk to buffer
+                audio_buffer.append(audio_chunk)
+                
+                # Process buffer when it reaches the desired size
+                if len(audio_buffer) >= buffer_size:
+                    # Process the accumulated buffer
+                    await _process_audio_buffer(session_id, audio_buffer, model, language)
+                    
+                    # Clear the buffer after processing
+                    audio_buffer = []
+                
+                # Update status
+                if session_id in transcription_status:
+                    transcription_status[session_id]["chunks_processed"] += 1
+                    transcription_status[session_id]["last_update"] = time.time()
+            
+            except queue.Empty:
+                # No audio chunk available, process buffer if it has content
+                if audio_buffer:
+                    # Process what we have so far
+                    await _process_audio_buffer(session_id, audio_buffer, model, language)
+                    audio_buffer = []
+                continue
+    
     except Exception as e:
-        logger.error(f"Error transcribing audio stream: {e}")
-        transcription_status[session_id]["status"] = "error"
-        transcription_status[session_id]["error"] = str(e)
+        logger.error(f"Error in transcription thread for session {session_id}: {e}")
+        
+        if session_id in transcription_status:
+            transcription_status[session_id]["status"] = "error"
+            transcription_status[session_id]["error"] = str(e)
 
-def process_audio_file(session_id: str, audio_path: str, model: str = "whisper-small", language: str = "en", db=None) -> bool:
+async def _process_audio_buffer(session_id: str, audio_buffer, model: str, language: str):
+    """Process a buffer of audio chunks for transcription."""
+    try:
+        # Determine the transcription provider based on the model prefix
+        if model.startswith("whisper"):
+            # Extract model size from the model string (e.g., "whisper-small" -> "small")
+            model_size = model.split("-")[1] if "-" in model else "small"
+            
+            # Combine audio chunks into a single file for processing
+            combined_audio_path = os.path.join(
+                os.path.dirname(audio_buffer[0]),
+                f"combined_{int(time.time())}.wav"
+            )
+            
+            # TODO: Implement proper audio concatenation
+            # For now, just use the first chunk as a placeholder
+            combined_audio_path = audio_buffer[0]
+            
+            # Process with Whisper
+            segments = await _transcribe_with_whisper(combined_audio_path, model_size, language)
+            
+        elif model.startswith("deepgram") and DEEPGRAM_AVAILABLE:
+            # Process with Deepgram
+            from ..config import settings
+            dg_client = Deepgram(settings.DEEPGRAM_API_KEY)
+            
+            # Combine audio chunks
+            audio_data = b''.join([open(chunk, 'rb').read() for chunk in audio_buffer])
+            
+            # Send to Deepgram API
+            source = {"buffer": audio_data, "mimetype": "audio/pcm"}
+            response = await dg_client.transcription.prerecorded(source, {
+                'punctuate': True,
+                'language': language,
+                'model': 'nova-2'
+            })
+            
+            # Extract results
+            segments = []
+            for result in response.results.channels[0].alternatives[0].words:
+                segments.append({
+                    "timestamp": result.start,
+                    "end_timestamp": result.end,
+                    "text": result.word,
+                    "confidence": result.confidence
+                })
+            
+        elif model.startswith("assemblyai") and ASSEMBLYAI_AVAILABLE:
+            # Process with AssemblyAI
+            from ..config import settings
+            aai.settings.api_key = settings.ASSEMBLYAI_API_KEY
+            
+            # Combine audio chunks
+            combined_audio_path = os.path.join(
+                os.path.dirname(audio_buffer[0]),
+                f"combined_{int(time.time())}.wav"
+            )
+            
+            # TODO: Implement proper audio concatenation
+            # For now, just use the first chunk as a placeholder
+            combined_audio_path = audio_buffer[0]
+            
+            # Create transcriber
+            transcriber = aai.Transcriber()
+            transcript = await transcriber.transcribe(combined_audio_path)
+            
+            # Extract results
+            segments = []
+            for word in transcript.words:
+                segments.append({
+                    "timestamp": word.start,
+                    "end_timestamp": word.end,
+                    "text": word.text,
+                    "confidence": word.confidence
+                })
+        
+        else:
+            # Fallback to Whisper if model not recognized
+            logger.warning(f"Unrecognized model '{model}', falling back to whisper-small")
+            segments = await _transcribe_with_whisper(audio_buffer[0], "small", language)
+        
+        # Add transcription results to the status
+        if session_id in transcription_status and segments:
+            # Combine segments into a single piece of text
+            text = " ".join([segment["text"] for segment in segments])
+            
+            # Create a transcription entry
+            transcription = {
+                "id": str(uuid.uuid4()),
+                "session_id": session_id,
+                "timestamp": time.time(),
+                "text": text,
+                "segments": segments,
+                "model": model
+            }
+            
+            # Add to current buffer for this session
+            transcription_status[session_id]["current_buffer"].append(transcription)
+            
+            # If buffer reaches a threshold, save to database and clear
+            if len(transcription_status[session_id]["current_buffer"]) >= 5:
+                # TODO: Save to database
+                transcription_status[session_id]["current_buffer"] = []
+            
+            # Broadcast the transcription via WebSocket if possible
+            try:
+                from ..routers.websocket_router import connection_manager
+                
+                # Broadcast to all clients subscribed to this session
+                await connection_manager.broadcast_to_session(
+                    session_id=session_id,
+                    message_type="transcription",
+                    data=transcription
+                )
+            except Exception as e:
+                logger.error(f"Error broadcasting transcription: {e}")
+    
+    except Exception as e:
+        logger.error(f"Error processing audio buffer: {e}")
+        # Don't raise the exception, just log it to avoid breaking the stream processing
+
+async def process_audio_file(session_id: str, audio_path: str, model: str = "whisper-small", language: str = "en", db=None) -> bool:
     """Process an audio file for transcription."""
     try:
         # Initialize status
@@ -314,7 +500,7 @@ def process_audio_file(session_id: str, audio_path: str, model: str = "whisper-s
         
         return False
 
-def start_transcription(session_id: str, audio_path: str, model: str = "whisper-small", language: str = "en") -> bool:
+async def start_transcription(session_id: str, audio_path: str, model: str = "whisper-small", language: str = "en") -> bool:
     """Start real-time transcription for a session."""
     try:
         # Check if already transcribing
@@ -326,21 +512,20 @@ def start_transcription(session_id: str, audio_path: str, model: str = "whisper-
         audio_queue = queue.Queue()
         
         # Start transcription in a separate thread
-        thread = threading.Thread(
-            target=_transcribe_audio_stream,
-            args=(session_id, audio_queue, model, language)
-        )
-        thread.daemon = True
-        thread.start()
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(_transcribe_audio_stream(session_id, audio_queue, model, language))
         
         # Store active transcription
         active_transcriptions[session_id] = {
-            "thread": thread,
-            "audio_queue": audio_queue
+            "task": task,
+            "audio_queue": audio_queue,
+            "model": model,
+            "language": language,
+            "audio_path": audio_path
         }
         
         # Wait for transcription to start
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
         
         # Check if transcription started successfully
         if session_id in transcription_status and transcription_status[session_id]["status"] == "transcribing":
@@ -351,7 +536,7 @@ def start_transcription(session_id: str, audio_path: str, model: str = "whisper-
         logger.error(f"Error starting transcription: {e}")
         return False
 
-def stop_transcription(session_id: str) -> bool:
+async def stop_transcription(session_id: str) -> bool:
     """Stop real-time transcription for a session."""
     try:
         # Check if transcribing
@@ -363,11 +548,19 @@ def stop_transcription(session_id: str) -> bool:
         if session_id in transcription_status:
             transcription_status[session_id]["status"] = "stopping"
         
-        # Signal thread to stop
+        # Signal task to stop
         active_transcriptions[session_id]["audio_queue"].put(None)
         
-        # Wait for thread to finish
-        active_transcriptions[session_id]["thread"].join(timeout=2.0)
+        # Wait for task to finish (with timeout)
+        try:
+            task = active_transcriptions[session_id]["task"]
+            await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout waiting for transcription task to complete for session {session_id}")
+        
+        # Clean up
+        if session_id in audio_chunk_queues:
+            del audio_chunk_queues[session_id]
         
         # Remove from active transcriptions
         del active_transcriptions[session_id]
@@ -375,13 +568,18 @@ def stop_transcription(session_id: str) -> bool:
         # Update status
         if session_id in transcription_status:
             transcription_status[session_id]["status"] = "stopped"
+            
+            # Process and save any remaining transcriptions in the buffer
+            if transcription_status[session_id].get("current_buffer"):
+                # TODO: Save to database
+                transcription_status[session_id]["current_buffer"] = []
         
         return True
     except Exception as e:
         logger.error(f"Error stopping transcription: {e}")
         return False
 
-def get_transcription_status(session_id: str) -> Dict[str, Any]:
+async def get_transcription_status(session_id: str) -> Dict[str, Any]:
     """Get transcription status for a session."""
     try:
         # Check if transcribing
@@ -390,7 +588,9 @@ def get_transcription_status(session_id: str) -> Dict[str, Any]:
                 "session_id": session_id,
                 "status": transcription_status[session_id]["status"],
                 "model": transcription_status[session_id].get("model"),
-                "language": transcription_status[session_id].get("language")
+                "language": transcription_status[session_id].get("language"),
+                "chunks_processed": transcription_status[session_id].get("chunks_processed", 0),
+                "last_update": transcription_status[session_id].get("last_update")
             }
         else:
             return {
@@ -404,3 +604,47 @@ def get_transcription_status(session_id: str) -> Dict[str, Any]:
             "status": "error",
             "error": str(e)
         }
+
+async def process_audio_chunk(session_id: str, chunk_path: str, chunk_index: int, timestamp: Optional[float] = None) -> bool:
+    """Process a single audio chunk for real-time transcription.
+    
+    Args:
+        session_id: ID of the session the audio chunk belongs to
+        chunk_path: Path to the audio chunk file
+        chunk_index: Index of the chunk in the sequence
+        timestamp: Optional timestamp of when the chunk was recorded
+        
+    Returns:
+        bool: True if the chunk was processed successfully, False otherwise
+    """
+    try:
+        # Check if we have an active transcription for this session
+        if session_id not in active_transcriptions:
+            # Start a new transcription if one doesn't exist
+            logger.info(f"Starting new transcription for session {session_id} from chunk")
+            
+            # Determine the folder path from the chunk path
+            folder_path = os.path.dirname(chunk_path)
+            
+            # Use default model and language if not specified
+            from ..config import settings
+            model = settings.DEFAULT_TRANSCRIPTION_PROVIDER or "whisper-small"
+            language = settings.TRANSCRIPTION_LANGUAGE or "en"
+            
+            # Start transcription
+            success = await start_transcription(session_id, folder_path, model, language)
+            if not success:
+                logger.error(f"Failed to start transcription for session {session_id}")
+                return False
+        
+        # Add the chunk to the queue for processing
+        if session_id in active_transcriptions:
+            active_transcriptions[session_id]["audio_queue"].put(chunk_path)
+            return True
+        else:
+            logger.error(f"No active transcription found for session {session_id}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error processing audio chunk: {e}")
+        return False

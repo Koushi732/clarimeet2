@@ -1,15 +1,25 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 import { 
-  Session, 
   SessionDetail, 
   Transcription, 
   Summary, 
-  TranscriptionStatus, 
-  SummarizationStatus, 
+  TranscriptionStatus as ImportedTranscriptionStatus, 
+  SummarizationStatus as ImportedSummarizationStatus, 
   ActiveSession 
 } from '../types';
 import { useWebSocketBridge, WebSocketMessageType, WebSocketMessage } from './WebSocketContextBridge';
+
+// Update Session interface to include status field
+interface Session {
+  id: string;
+  title: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+  duration: number;
+  status?: 'idle' | 'recording' | 'processing' | 'completed' | 'error';
+}
 
 interface SessionContextType {
   sessions: Session[];
@@ -48,16 +58,83 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Handle WebSocket messages related to transcription and summarization
   useEffect(() => {
-    if (!lastMessage || !currentSession?.session) return;
+    if (!lastMessage) return;
+    
+    console.log('Received WebSocket message:', lastMessage.type, lastMessage.data);
+    
+    // Process message even if we don't have a current session yet
+    // This helps with initial data population
+    if (!currentSession?.session && 
+        (lastMessage.type === 'transcription_update' || 
+         lastMessage.type === 'summary_update')) {
+      console.log('Received data before session was set, checking if we should create session');
+      // Try to extract session ID from the message
+      const msgSessionId = lastMessage.data?.sessionId || lastMessage.data?.session_id;
+      
+      if (msgSessionId) {
+        console.log(`Creating initial session context for session ${msgSessionId}`);
+        // Create a basic session to hold the incoming data
+        const initialSession: Session = {
+          id: msgSessionId,
+          title: 'Current Recording',
+          description: 'Recording in progress',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          duration: 0,
+          status: 'recording'
+        };
+        
+        setCurrentSession({
+          session: initialSession,
+          recordingStatus: { isRecording: true, sessionId: msgSessionId },
+          transcriptionStatus: { status: 'in_progress', sessionId: msgSessionId },
+          summarizationStatus: null,
+          currentTranscriptions: [],
+          currentSummaries: []
+        });
+        
+        return; // Wait for next update to process the actual data
+      }
+    }
+    
+    if (!currentSession?.session) return;
     
     const sessionId = currentSession.session.id;
+    console.log(`Processing message for session ${sessionId}`);
     
     switch(lastMessage.type) {
       case 'transcription_update':
-        const transcription = lastMessage.data as Transcription;
-        if (transcription.sessionId === sessionId) {
+      case 'transcription': // Handle both message types
+        let transcription;
+        if (typeof lastMessage.data === 'string') {
+          // Parse if the data is a string
+          try {
+            transcription = JSON.parse(lastMessage.data);
+          } catch (e) {
+            console.error('Failed to parse transcription data:', e);
+            transcription = { text: lastMessage.data, timestamp: Date.now() / 1000 };
+          }
+        } else {
+          transcription = lastMessage.data as Transcription;
+        }
+        
+        // Generate an ID if missing
+        if (!transcription.id) {
+          transcription.id = `trans-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        }
+        
+        // Handle both sessionId and session_id formats
+        const transSessionId = transcription.sessionId || transcription.session_id;
+        
+        if (transSessionId === sessionId || !transSessionId) { // Accept if matches or missing
+          console.log('Adding new transcription:', transcription);
           setCurrentSession(prev => {
             if (!prev) return null;
+            
+            // Avoid duplicates by checking ID
+            const exists = prev.currentTranscriptions.some(t => t.id === transcription.id);
+            if (exists) return prev;
+            
             return {
               ...prev,
               currentTranscriptions: [...prev.currentTranscriptions, transcription]
@@ -67,10 +144,37 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         break;
         
       case 'summary_update':
-        const summary = lastMessage.data as Summary;
-        if (summary.sessionId === sessionId) {
+      case 'summary': // Handle both message types
+        let summary;
+        if (typeof lastMessage.data === 'string') {
+          // Parse if the data is a string
+          try {
+            summary = JSON.parse(lastMessage.data);
+          } catch (e) {
+            console.error('Failed to parse summary data:', e);
+            summary = { text: lastMessage.data, timestamp: Date.now() / 1000 };
+          }
+        } else {
+          summary = lastMessage.data as Summary;
+        }
+        
+        // Generate an ID if missing
+        if (!summary.id) {
+          summary.id = `summ-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        }
+        
+        // Handle both sessionId and session_id formats
+        const summarySessionId = summary.sessionId || summary.session_id;
+        
+        if (summarySessionId === sessionId || !summarySessionId) { // Accept if matches or missing
+          console.log('Adding new summary:', summary);
           setCurrentSession(prev => {
             if (!prev) return null;
+            
+            // Avoid duplicates by checking ID
+            const exists = prev.currentSummaries.some(s => s.id === summary.id);
+            if (exists) return prev;
+            
             return {
               ...prev,
               currentSummaries: [...prev.currentSummaries, summary]
@@ -80,8 +184,11 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         break;
         
       case 'transcription_status_update':
-        const transStatus = lastMessage.data as TranscriptionStatus;
-        if (transStatus.sessionId === sessionId) {
+        const transStatus = lastMessage.data as ImportedTranscriptionStatus;
+        const transStatusSessionId = transStatus.sessionId;
+        
+        if (transStatusSessionId === sessionId || !transStatusSessionId) {
+          console.log('Updating transcription status:', transStatus);
           setCurrentSession(prev => {
             if (!prev) return null;
             return {
@@ -93,8 +200,11 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         break;
         
       case 'summarization_status_update':
-        const summStatus = lastMessage.data as SummarizationStatus;
-        if (summStatus.sessionId === sessionId) {
+        const summStatus = lastMessage.data as ImportedSummarizationStatus;
+        const summStatusSessionId = summStatus.sessionId;
+        
+        if (summStatusSessionId === sessionId || !summStatusSessionId) {
+          console.log('Updating summarization status:', summStatus);
           setCurrentSession(prev => {
             if (!prev) return null;
             return {
@@ -104,6 +214,16 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
           });
         }
         break;
+        
+      // Handle any other message types
+      case 'audio_status':
+      case 'session_update':
+      case 'error':
+        console.log(`Received ${lastMessage.type} message:`, lastMessage.data);
+        break;
+        
+      default:
+        console.log(`Unhandled message type: ${lastMessage.type}`, lastMessage.data);
     }
   }, [lastMessage, currentSession]);
 

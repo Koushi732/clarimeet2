@@ -29,6 +29,7 @@ const MiniTab = (): React.ReactElement => {
   const [elapsedTime, setElapsedTime] = useState(0);
   const [activeTab, setActiveTab] = useState<'summary' | 'chat'>('summary');
   const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isHovering, setIsHovering] = useState(false);
   const [isExpandedByHover, setIsExpandedByHover] = useState(false);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isNearEdge, setIsNearEdge] = useState(false);
@@ -55,17 +56,6 @@ const MiniTab = (): React.ReactElement => {
       if (interval) clearInterval(interval);
     };
   }, [recordingStatus, currentSession]);
-  
-  // If the active tab is summary, but there are no summaries yet and transcriptions are available,
-  // show the transcriptions tab instead
-  useEffect(() => {
-    if (activeTab === 'summary' && 
-        currentSession?.currentSummaries?.length === 0 && 
-        currentSession?.currentTranscriptions?.length > 0) {
-      // Switch to transcriptions tab automatically
-      setActiveTab('chat');
-    }
-  }, [currentSession?.currentSummaries, currentSession?.currentTranscriptions, activeTab]);
 
   // Format time as mm:ss
   const formatTime = (seconds: number): string => {
@@ -170,6 +160,7 @@ const MiniTab = (): React.ReactElement => {
         }}
         transition={{ duration: 0.2 }}
         onMouseEnter={() => {
+          setIsHovering(true);
           if (isCollapsed) {
             hoverTimeoutRef.current = setTimeout(() => {
               setIsExpandedByHover(true);
@@ -177,6 +168,7 @@ const MiniTab = (): React.ReactElement => {
           }
         }}
         onMouseLeave={() => {
+          setIsHovering(false);
           if (hoverTimeoutRef.current) {
             clearTimeout(hoverTimeoutRef.current);
             hoverTimeoutRef.current = null;

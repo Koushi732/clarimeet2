@@ -29,21 +29,31 @@ export const useWebSocket = (
   const ws = useRef<WebSocket | null>(null);
   const messageHandlers = useRef<Map<string, Set<MessageHandler>>>(new Map());
 
-  // Connect to WebSocket
+  // Connect to WebSocket with improved reliability
   const connect = useCallback(() => {
-    if (ws.current?.readyState === WebSocket.OPEN) return;
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      console.log('WebSocket already connected');
+      return;
+    }
 
     // Close existing connection if any
     if (ws.current) {
-      ws.current.close();
+      console.log('Closing existing WebSocket connection');
+      try {
+        ws.current.close();
+      } catch (err) {
+        console.warn('Error closing existing WebSocket:', err);
+      }
     }
 
+    console.log(`Connecting to WebSocket: ${url}`);
     setStatus('connecting');
     
     const socket = new WebSocket(url);
     ws.current = socket;
 
     socket.onopen = () => {
+      console.log('WebSocket connection established successfully');
       setStatus('open');
       reconnectCount.current = 0;
       if (onOpen) onOpen();
@@ -52,45 +62,95 @@ export const useWebSocket = (
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        // Log the message type but not the full data (could be large)
+        console.log(`Received WebSocket message: ${data.type || 'unknown type'}`);
         setLastMessage(data);
         
         // Handle message based on type
         if (data.type && messageHandlers.current.has(data.type)) {
-          messageHandlers.current.get(data.type)?.forEach((handler) => {
-            handler(data);
-          });
+          const handlers = messageHandlers.current.get(data.type);
+          if (handlers && handlers.size > 0) {
+            console.log(`Invoking ${handlers.size} handlers for message type: ${data.type}`);
+            handlers.forEach((handler) => {
+              try {
+                handler(data);
+              } catch (handlerError) {
+                console.error(`Error in message handler for ${data.type}:`, handlerError);
+              }
+            });
+          }
         }
       } catch (error) {
         console.error('Error parsing WebSocket message:', error);
+        console.log('Raw message data:', event.data.substring(0, 100) + '...');
       }
     };
-
-    socket.onclose = () => {
+    
+    socket.onerror = (error) => {
+      console.error('WebSocket connection error:', error);
+      setStatus('error');
+      if (onError) onError(error);
+    };
+    
+    socket.onclose = (event) => {
+      console.log(`WebSocket connection closed with code: ${event.code}, reason: ${event.reason || 'No reason provided'}`);
       setStatus('closed');
       
-      // Attempt to reconnect
+      // Attempt to reconnect with exponential backoff
       if (reconnectCount.current < reconnectAttempts) {
+        const delay = reconnectInterval * Math.pow(1.5, reconnectCount.current);
+        console.log(`Attempting to reconnect in ${delay}ms (attempt ${reconnectCount.current + 1}/${reconnectAttempts})`);
         reconnectCount.current += 1;
-        setTimeout(() => connect(), reconnectInterval);
+        setTimeout(() => connect(), delay);
+      } else {
+        console.warn(`Maximum reconnection attempts (${reconnectAttempts}) reached. Giving up.`);
       }
       
       if (onClose) onClose();
     };
-
-    socket.onerror = (error) => {
-      setStatus('error');
-      if (onError) onError(error);
-    };
   }, [url, reconnectInterval, reconnectAttempts, onOpen, onClose, onError]);
 
-  // Send message
+  // Send message with better error handling and reconnection
   const sendMessage = useCallback((data: any) => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(typeof data === 'string' ? data : JSON.stringify(data));
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
+      console.warn('WebSocket not open, attempting reconnection before sending message');
+      // Try to reconnect if needed
+      if (status !== 'connecting') {
+        connect();
+      }
+      
+      // Queue the message to be sent after a short delay (after connection is established)
+      setTimeout(() => {
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+          try {
+            const message = typeof data === 'string' ? data : JSON.stringify(data);
+            ws.current.send(message);
+            console.log('Message sent after reconnection:', data.type || 'unknown');
+            return true;
+          } catch (err) {
+            console.error('Error sending delayed message:', err);
+            return false;
+          }
+        } else {
+          console.error('WebSocket still not open after reconnection attempt');
+          return false;
+        }
+      }, 500);
+      
+      // Indicate that the message will be sent asynchronously
       return true;
     }
-    return false;
-  }, []);
+    
+    try {
+      const message = typeof data === 'string' ? data : JSON.stringify(data);
+      ws.current.send(message);
+      console.log('Message sent successfully:', data.type || 'unknown');
+      return true;
+    } catch (err) {
+      console.error('Error sending message:', err);
+      return false;
+    }
+  }, [status, connect]);
 
   // Register message handler
   const addMessageHandler = useCallback((type: string, handler: MessageHandler) => {
