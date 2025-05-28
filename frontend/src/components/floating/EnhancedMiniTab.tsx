@@ -6,7 +6,8 @@ import { useAudio } from '../../contexts/AudioContext';
 import { updateMiniTabPosition } from '../../utils/electronBridge';
 
 // Import panel components
-import { LiveSummaryPanel, AIChatbotPanel, NotebookPanel } from './panels';
+import { LiveSummaryPanel, AIChatbotPanel, LiveTranscriptionPanel } from './panels';
+import NotebookPanel from './panels/NotebookPanel';
 
 // Icons
 import {
@@ -21,7 +22,7 @@ import {
 } from '@heroicons/react/24/solid';
 
 // Panel types for the MiniTab
-export type MiniTabPanel = 'summary' | 'chatbot' | 'notebook';
+export type MiniTabPanel = 'transcription' | 'summary' | 'chatbot' | 'notebook';
 
 interface EnhancedMiniTabProps {
   initialPanel?: MiniTabPanel;
@@ -30,7 +31,7 @@ interface EnhancedMiniTabProps {
 }
 
 const EnhancedMiniTab: React.FC<EnhancedMiniTabProps> = ({
-  initialPanel = 'summary',
+  initialPanel = 'transcription',
   onClose = () => {},
   isElectronWindow = false,
 }) => {
@@ -125,15 +126,17 @@ const EnhancedMiniTab: React.FC<EnhancedMiniTabProps> = ({
   // Determine container classes based on state
   const containerClasses = `
     enhanced-mini-tab
-    ${isElectronWindow ? 'fixed' : 'absolute'}
+    ${isElectronWindow ? 'fixed' : 'relative'}
     ${isExpanded ? 'w-96' : 'w-72'}
-    shadow-lg rounded-lg bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-600 overflow-hidden z-50
+    shadow-lg rounded-lg bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-600 overflow-hidden
     transition-all duration-300 ease-in-out
   `;
 
   // Render active panel content
   const renderPanelContent = () => {
     switch (activePanel) {
+      case 'transcription':
+        return <LiveTranscriptionPanel session={currentSession} />;
       case 'summary':
         return <LiveSummaryPanel session={currentSession} />;
       case 'chatbot':
@@ -141,7 +144,7 @@ const EnhancedMiniTab: React.FC<EnhancedMiniTabProps> = ({
       case 'notebook':
         return <NotebookPanel session={currentSession} />;
       default:
-        return <LiveSummaryPanel session={currentSession} />;
+        return null;
     }
   };
   
@@ -202,6 +205,18 @@ const EnhancedMiniTab: React.FC<EnhancedMiniTabProps> = ({
 
       {/* Tab Navigation */}
       <div className="flex justify-between p-1 bg-gray-100 dark:bg-dark-700">
+        <button
+          onClick={() => setActivePanel('transcription')}
+          className={`flex-1 flex items-center justify-center p-2 rounded-md text-xs font-medium transition-colors duration-150 ease-in-out ${
+            activePanel === 'transcription'
+              ? 'bg-primary-500 text-white'
+              : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600'
+          }`}
+        >
+          <MicrophoneIcon className="h-4 w-4 mr-1" />
+          Live
+        </button>
+        
         <button
           onClick={() => setActivePanel('summary')}
           className={`flex-1 flex items-center justify-center p-2 rounded-md text-xs font-medium transition-colors duration-150 ease-in-out ${

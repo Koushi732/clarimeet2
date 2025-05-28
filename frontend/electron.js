@@ -58,10 +58,25 @@ function createMainWindow() {
 
 // App is ready event handler
 function createTray() {
-  const iconPath = path.join(__dirname, 'public', 'favicon.ico');
-  tray = new Tray(iconPath);
-  
-  const contextMenu = Menu.buildFromTemplate([
+  try {
+    let iconPath = path.join(__dirname, 'public', 'favicon.ico');
+    
+    // Fallback to default icon if file doesn't exist
+    if (!fs.existsSync(iconPath)) {
+      console.warn('Favicon not found at path:', iconPath);
+      // Use a simple empty tray icon as fallback
+      iconPath = path.join(__dirname, 'public', 'favicon.svg');
+      if (!fs.existsSync(iconPath)) {
+        // If SVG doesn't exist either, use a system icon
+        if (process.platform === 'win32') {
+          iconPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'shell32.dll');
+        }
+      }
+    }
+    
+    tray = new Tray(iconPath);
+    
+    const contextMenu = Menu.buildFromTemplate([
     { 
       label: 'Open Clarimeet', 
       click: () => mainWindow.show() 
@@ -95,6 +110,9 @@ function createTray() {
       mainWindow.show();
     }
   });
+  } catch (error) {
+    console.error('Error creating tray:', error);
+  }
 }
 
 // Audio recording variables

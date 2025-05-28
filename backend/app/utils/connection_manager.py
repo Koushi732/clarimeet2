@@ -14,6 +14,7 @@ import json
 import time
 from typing import Dict, List, Any, Optional, Callable, Set, Union
 from fastapi import WebSocket, WebSocketDisconnect
+from .websocket_lock import connection_manager as ws_lock_manager
 
 # Configure logging
 logging.basicConfig(
@@ -180,6 +181,26 @@ class ConnectionManager:
         for client_id in clients:
             await self.send_message(client_id, message_type, data)
     
+    def is_connection_active(self, client_id: str) -> bool:
+        """
+        Check if a client connection is active and valid.
+        
+        Args:
+            client_id: ID of the client to check
+            
+        Returns:
+            True if the connection is active, False otherwise
+        """
+        if client_id not in self.active_connections:
+            return False
+            
+        try:
+            websocket = self.active_connections[client_id]
+            # Check if the WebSocket is still open
+            return not websocket.client_state.DISCONNECTED
+        except Exception:
+            return False
+            
     async def receive_and_process(self, client_id: str) -> None:
         """
         Receive and process messages from a client.
@@ -190,48 +211,66 @@ class ConnectionManager:
         Raises:
             WebSocketDisconnect: If the client disconnects
         """
-        if client_id not in self.active_connections:
-            logger.warning(f"Cannot receive messages: Client {client_id} not connected")
+        if not self.is_connection_active(client_id):
+            logger.error(f"Cannot receive messages from non-connected client: {client_id}")
+            # Clean up any stale connection references
+            if client_id in self.active_connections:
+                del self.active_connections[client_id]
+                self.connection_status[client_id] = "disconnected"
+                ws_lock_manager.remove_lock(client_id)
             return
         
         websocket = self.active_connections[client_id]
         
         try:
-            # Wait for a message
-            message_json = await websocket.receive_text()
+            # Use the lock manager to safely receive messages and prevent concurrent receive operations
+            data = await ws_lock_manager.receive_safe(websocket, client_id)
+            
+            # If receive_safe returns None, there was an error or timeout
+            if data is None:
+                # Check if the connection is still active after the receive attempt
+                if not self.is_connection_active(client_id):
+                    logger.info(f"Connection for client {client_id} is no longer active")
+                    if client_id in self.active_connections:
+                        del self.active_connections[client_id]
+                        self.connection_status[client_id] = "disconnected"
+                        ws_lock_manager.remove_lock(client_id)
+                return
             
             try:
-                # Parse the message
-                message = json.loads(message_json)
+                # Parse the message as JSON
+                message = json.loads(data)
                 
-                # Process the message based on its type
-                if isinstance(message, dict) and "type" in message:
-                    message_type = message["type"]
-                    message_data = message.get("data", {})
-                    
-                    # Call handlers for this message type
-                    await self._process_message(client_id, message_type, message_data)
-                    
-                    # Echo back the message as confirmation (helpful for debugging)
-                    await self.send_message(client_id, message_type, message_data)
-                else:
-                    logger.warning(f"Received malformed message from {client_id}: {message_json}")
-                    
+                # Extract message type and data
+                message_type = message.get("type")
+                message_data = message.get("data", {})
+                
+                if not message_type:
+                    logger.warning(f"Received message without type from client {client_id}")
+                    return
+                
+                # Process the message
+                await self._process_message(client_id, message_type, message_data)
             except json.JSONDecodeError:
-                logger.warning(f"Received invalid JSON from {client_id}: {message_json}")
-                
+                logger.warning(f"Received non-JSON message from client {client_id}: {data}")
+            except Exception as e:
+                logger.error(f"Error processing message from client {client_id}: {e}")
         except WebSocketDisconnect:
-            # Client disconnected, clean up
+            # Handle client disconnection
+            logger.info(f"Client disconnected: {client_id}")
             self.connection_status[client_id] = "disconnected"
             if client_id in self.active_connections:
                 del self.active_connections[client_id]
-            logger.info(f"Client disconnected: {client_id}")
+            # Clean up the lock for this client
+            ws_lock_manager.remove_lock(client_id)
             raise
-            
         except Exception as e:
-            # Other error, mark connection as potentially broken
             logger.error(f"Error receiving message from client {client_id}: {e}")
             self.connection_status[client_id] = "error"
+            # Handle the error by cleaning up the connection
+            if client_id in self.active_connections:
+                del self.active_connections[client_id]
+                ws_lock_manager.remove_lock(client_id)
     
     def register_handler(self, message_type: str, handler: Callable) -> None:
         """
