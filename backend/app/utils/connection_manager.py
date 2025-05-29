@@ -53,20 +53,27 @@ class ConnectionManager:
         
         logger.info("WebSocket connection manager initialized")
     
-    async def connect(self, client_id: str, websocket: WebSocket) -> bool:
+    async def connect(self, client_id: str, websocket: WebSocket, already_accepted: bool = False) -> bool:
         """
         Accept a WebSocket connection and register it with a client ID.
         
         Args:
             client_id: Unique identifier for the client
             websocket: WebSocket connection to register
+            already_accepted: Whether the WebSocket connection has already been accepted
             
         Returns:
             True if connection was successful, False otherwise
         """
         try:
-            # Accept the connection
-            await websocket.accept()
+            # Accept the connection if not already accepted
+            if not already_accepted:
+                try:
+                    await websocket.accept()
+                except RuntimeError as e:
+                    if "already accepted" not in str(e).lower():
+                        # Only re-raise if it's not an 'already accepted' error
+                        raise
             
             # If client was already connected, clean up the old connection
             if client_id in self.active_connections:

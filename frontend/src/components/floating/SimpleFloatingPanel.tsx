@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { MicrophoneIcon, ChartBarIcon, ChatBubbleLeftRightIcon, XMarkIcon } from '@heroicons/react/24/solid';
-import { useAudio } from '../../contexts/AudioContext';
-import { useWebSocketBridge } from '../../contexts/WebSocketContextBridge';
+import React, { useState, useEffect, useRef } from 'react';
+import { XMarkIcon, ArrowsPointingOutIcon, ArrowsPointingInIcon, Cog6ToothIcon, MicrophoneIcon, DocumentTextIcon, PaperAirplaneIcon, UserIcon, ChartBarIcon, ChatBubbleLeftRightIcon } from '@heroicons/react/24/solid';
+import { useWebSocketBridge, WebSocketMessageType, MessageTypes } from '../../contexts/WebSocketContextBridge';
 import { useSession } from '../../contexts/SessionContext';
+import { useAudio } from '../../contexts/AudioContext';
 
 /**
  * A simple, reliable floating panel that works without complex WebSocket handling
@@ -40,7 +40,7 @@ const SimpleFloatingPanel: React.FC = () => {
       console.log('Setting up WebSocket handlers for real data');
       
       // Handle transcription updates
-      const removeTranscriptionHandler = addMessageHandler('transcription', (data) => {
+      const removeTranscriptionHandler = addMessageHandler(MessageTypes.TRANSCRIPTION, (data) => {
         console.log('Received transcription update:', data);
         if (data && data.text) {
           setTranscriptions(prev => [
@@ -55,7 +55,7 @@ const SimpleFloatingPanel: React.FC = () => {
       });
       
       // Handle summary updates
-      const removeSummaryHandler = addMessageHandler('summary', (data) => {
+      const removeSummaryHandler = addMessageHandler(MessageTypes.SUMMARY, (data) => {
         console.log('Received summary update:', data);
         if (data && data.text) {
           setSummaries(prev => [
@@ -77,6 +77,9 @@ const SimpleFloatingPanel: React.FC = () => {
       };
     }
   }, [connected, addMessageHandler]);
+  
+  // Ref to track if we've shown disconnection message (must be at top level)
+  const hasShownDisconnectionRef = React.useRef(false);
   
   // Show when recording starts and handle WebSocket connection
   useEffect(() => {
@@ -104,71 +107,79 @@ const SimpleFloatingPanel: React.FC = () => {
         return;
       }
       
-      console.log('Using mock data for disconnected mode');
-      // Simulate receiving new transcriptions and summaries when not connected to WebSocket
-      const transcriptionInterval = setInterval(() => {
-        const mockPhrases = [
-          "We need to focus on expanding our market reach.",
-          "The new product launch is scheduled for next month.",
-          "Customer satisfaction scores have improved significantly.",
-          "We should allocate more resources to research and development.",
-          "The marketing team has proposed a new campaign strategy."
-        ];
+      // Only show disconnection message once per recording session
+      if (!hasShownDisconnectionRef.current) {
+        console.log('WebSocket disconnected. Please check your connection to the server.');
         
-        const randomPhrase = mockPhrases[Math.floor(Math.random() * mockPhrases.length)];
-        
+        // Display connection status instead of mock data
         setTranscriptions(prev => [
           ...prev, 
           { 
-            id: `tr-${Date.now()}`, 
-            text: randomPhrase, 
+            id: `connection-status-${Date.now()}`, 
+            text: "WebSocket disconnected. Please check your network connection and server status.", 
             timestamp: Date.now()/1000 
           }
         ]);
-      }, 10000); // New transcription every 10 seconds
+        
+        hasShownDisconnectionRef.current = true;
+      }
       
-      const summaryInterval = setInterval(() => {
-        setSummaries(prev => [
-          ...prev,
-          {
-            id: `sum-${Date.now()}`,
-            text: `Summary update: The meeting focused on ${transcriptions.length > 2 ? 
-              transcriptions[transcriptions.length-2].text.toLowerCase() : 
-              'business growth and strategy'}. Key points discussed include product launch plans and market expansion.`,
-            timestamp: Date.now()/1000,
-            summary_type: 'incremental'
-          }
-        ]);
-      }, 30000); // New summary every 30 seconds
+      // No mock data intervals - waiting for real connection
+      const connectionStatusInterval = setInterval(() => {
+        // Check connection status every 5 seconds
+        if (!connected) {
+          console.log('Still disconnected from WebSocket. Waiting for connection...');
+        }
+      }, 5000);
       
-      return () => {
-        clearInterval(transcriptionInterval);
-        clearInterval(summaryInterval);
-      };
+      return () => clearInterval(connectionStatusInterval);
     } else {
       setIsVisible(false);
     }
-  }, [recordingStatus, connected, currentSession, transcriptions.length, sendMessage]);
+  }, [recordingStatus?.isRecording, connected, currentSession?.session?.id, recordingStatus?.sessionId, sendMessage]);
   
-  // Setup WebSocket handler for chat responses
+  // Setup WebSocket handlers for various message types
   useEffect(() => {
     if (connected) {
-      const removeChatHandler = addMessageHandler('chat_response', (data) => {
+      console.log('Setting up WebSocket handlers for chat responses and other messages');
+      
+      // Handle chat responses from the AI assistant
+      const removeChatResponseHandler = addMessageHandler(MessageTypes.CHAT_RESPONSE, (data) => {
         console.log('Received chat response:', data);
-        if (data && data.message) {
+        if (data && data.data && data.data.content) {
           setChatMessages(prev => [
             ...prev,
             {
-              id: `assistant-${Date.now()}`,
-              role: 'assistant',
-              content: data.message,
-              timestamp: Date.now()/1000
+              id: data.data.id || `assistant-${Date.now()}`,
+              role: data.data.role || 'assistant',
+              content: data.data.content,
+              timestamp: data.data.timestamp || Date.now()/1000
             }
           ]);
         }
       });
       
-      return () => removeChatHandler();
+      // Handle chat messages from other users
+      const removeChatMessageHandler = addMessageHandler(MessageTypes.CHAT_MESSAGE, (data) => {
+        console.log('Received chat message from another user:', data);
+        if (data && data.data && data.data.content) {
+          // Only add if it's not from the current user
+          setChatMessages(prev => [
+            ...prev,
+            {
+              id: data.data.id || `user-${Date.now()}`,
+              role: data.data.role || 'user',
+              content: data.data.content,
+              timestamp: data.data.timestamp || Date.now()/1000
+            }
+          ]);
+        }
+      });
+      
+      return () => {
+        removeChatResponseHandler();
+        removeChatMessageHandler();
+      };
     }
   }, [connected, addMessageHandler]);
   
@@ -176,39 +187,60 @@ const SimpleFloatingPanel: React.FC = () => {
   const handleSendChatMessage = (message: string) => {
     if (!message.trim()) return;
     
-    // Add user message to chat UI immediately
-    const userMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: message,
-      timestamp: Date.now()/1000
-    };
+    // Get the current session ID
+    const currentSessionId = recordingStatus?.sessionId;
+    if (!currentSessionId) {
+      console.error('No active session ID for chat message');
+      return;
+    }
     
-    setChatMessages(prev => [...prev, userMessage]);
-    
-    // Try to send via WebSocket if connected
-    if (connected && currentSession?.session?.id) {
-      console.log('Sending chat message via WebSocket');
-      const success = sendMessage({
-        type: 'chat_request',
-        session_id: currentSession.session.id,
-        message: userMessage.content,
-        timestamp: Date.now()
-      });
-      
-      if (!success) {
-        console.warn('Failed to send chat message via WebSocket, using fallback');
-        useFallbackChatResponse();
+    // Add user message to chat (for immediate UI feedback)
+    setChatMessages(prev => [
+      ...prev,
+      {
+        id: `user-${Date.now()}`,
+        role: 'user',
+        content: message,
+        timestamp: Date.now()/1000
       }
+    ]);
+    
+    // Send message to server via WebSocket
+    if (connected) {
+      // Create message payload
+      const messagePayload = {
+        type: 'chat_message',
+        message: message,
+        session_id: currentSessionId,
+        timestamp: Date.now()
+      };
+      
+      // Send via WebSocket
+      sendMessage(messagePayload);
+      console.log('Sent chat message to server:', messagePayload);
     } else {
-      // Use fallback if not connected
-      console.log('Using fallback chat response (not connected to WebSocket)');
-      useFallbackChatResponse();
+      console.warn('WebSocket not connected, using fallback response');
+      // Fallback for when not connected
+      setTimeout(() => {
+        // Generate a response
+        const response = generateFallbackChatResponse();
+        
+        setChatMessages(prev => [
+          ...prev,
+          {
+            id: `assistant-${Date.now()}`,
+            role: 'assistant',
+            content: response,
+            timestamp: Date.now()/1000
+          }
+        ]);
+      }, 1000);
+      // Already handled by the setTimeout block above
     }
   };
   
   // Fallback chat response generator
-  const useFallbackChatResponse = () => {
+  const generateFallbackChatResponse = () => {
     setTimeout(() => {
       const responses = [
         "Based on the transcription, the team is focusing on market expansion strategies.",

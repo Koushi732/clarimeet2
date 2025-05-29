@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { MockWebSocketProvider } from './MockWebSocketContext';
-import { RealWebSocketProvider } from './RealWebSocketContext';
+import { RealWebSocketProvider } from './RealWebSocketContext.fixed';
 import { useSettings } from '../hooks/useSettings';
+import { io } from 'socket.io-client';
 
 interface WebSocketWrapperProps {
   children: React.ReactNode;
@@ -11,37 +12,67 @@ interface WebSocketWrapperProps {
 // This component will use either the real or mock implementation based on settings
 export const WebSocketWrapper: React.FC<WebSocketWrapperProps> = ({ children, sessionId }) => {
   const { settings } = useSettings();
-  const [useMock, setUseMock] = useState(true);
-  const [isBackendAvailable, setIsBackendAvailable] = useState(false);
+  // IMPORTANT: Always use real implementation by default, never use mock in development
+  const [useMock, setUseMock] = useState(false);
+  const [isBackendAvailable, setIsBackendAvailable] = useState(true);
   
   // Check if backend is available on component mount
   useEffect(() => {
     const checkBackendStatus = async () => {
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/health`, {
+        // Use a more reliable health check endpoint
+        const backendUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+        console.log(`Checking backend availability at ${backendUrl}/health`);
+        
+        const response = await fetch(`${backendUrl}/health`, {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
-          // Short timeout to avoid blocking UI
-          signal: AbortSignal.timeout(2000)
+          // Longer timeout for more reliable detection
+          signal: AbortSignal.timeout(5000)
         });
         
         if (response.ok) {
+          // Only log on state change to reduce console noise
+          if (!isBackendAvailable) {
+            console.log('Backend health check successful, using real WebSocket implementation');
+          }
           setIsBackendAvailable(true);
-          // Only use real implementation if explicitly enabled in settings
-          setUseMock(!settings.enableRealTimeAudio);
+          
+          // FORCE REAL IMPLEMENTATION: never use mock in development
+          setUseMock(false);
         } else {
+          // Only log on state change to reduce console noise
+          if (isBackendAvailable) {
+            console.warn(`Backend health check failed with status: ${response.status}`);
+            console.warn('Still using real WebSocket implementation despite health check failure');
+          }
           setIsBackendAvailable(false);
-          setUseMock(true);
+          // Continue using real implementation even if health check fails
+          // This allows the connection to retry if the server comes back online
+          setUseMock(false);
         }
       } catch (error) {
-        console.warn('Backend not available, using mock WebSocket:', error);
+        // Only log on state change to reduce console noise
+        if (isBackendAvailable) {
+          console.warn('Backend not available, but still using real WebSocket for reconnection');
+        }
         setIsBackendAvailable(false);
-        setUseMock(true);
+        // Continue using real implementation even if health check fails
+        // This allows the connection to retry if the server comes back online
+        setUseMock(false);
       }
     };
     
+    // Run the check immediately
     checkBackendStatus();
-  }, [settings.enableRealTimeAudio]);
+    
+    // Set up periodic health checks to detect if backend comes online, but less frequently
+    const healthCheckInterval = setInterval(checkBackendStatus, 30000); // Check every 30 seconds to reduce connection churn
+    
+    return () => {
+      clearInterval(healthCheckInterval);
+    };
+  }, []);
   
   return useMock ? (
     <div id="mock-websocket-provider" style={{ display: 'contents' }}>

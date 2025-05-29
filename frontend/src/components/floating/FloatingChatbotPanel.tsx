@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ChatBubbleLeftRightIcon, XMarkIcon, PaperAirplaneIcon, UserIcon } from '@heroicons/react/24/solid';
 import { useSession } from '../../contexts/SessionContext';
 import { useAudio } from '../../contexts/AudioContext';
-import { useWebSocketBridge } from '../../contexts/WebSocketContextBridge';
+import { useWebSocketBridge, WebSocketMessageType, MessageTypes } from '../../contexts/WebSocketContextBridge';
 import axios from 'axios';
 
 interface ChatMessage {
@@ -105,7 +105,7 @@ const FloatingChatbotPanel: React.FC = () => {
   
   // Register handler for chat responses from WebSocket
   useEffect(() => {
-    const removeHandler = addMessageHandler('chat_response', (data) => {
+    const removeHandler = addMessageHandler(MessageTypes.CHAT_RESPONSE, (data) => {
       console.log('Received chat response:', data);
       if (!data || !data.message) return;
       

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MicrophoneIcon, XMarkIcon, UserIcon } from '@heroicons/react/24/solid';
 import { useSession } from '../../contexts/SessionContext';
 import { useAudio } from '../../contexts/AudioContext';
-import { useWebSocketBridge } from '../../contexts/WebSocketContextBridge';
+import { useWebSocketBridge, WebSocketMessageType, MessageTypes } from '../../contexts/WebSocketContextBridge';
 
 /**
  * A simple floating panel that displays real-time transcription
@@ -56,7 +56,7 @@ const FloatingTranscriptionPanel: React.FC = () => {
   // Register direct message handler for transcription updates
   useEffect(() => {
     // Add direct message handler
-    const removeHandler = addMessageHandler('transcription_update', (data) => {
+    const removeHandler = addMessageHandler(MessageTypes.TRANSCRIPTION_UPDATE, (data) => {
       console.log('Direct transcription handler received data:', data);
       if (!data) return;
       
