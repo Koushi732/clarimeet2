@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
-import psutil
 import time
 import os
 
@@ -10,12 +9,10 @@ router = APIRouter()
 async def health_check():
     """Health check endpoint to verify backend services are running"""
     try:
-        # Basic system health
+        # Basic system health without psutil dependency
         system_health = {
-            "cpu_percent": psutil.cpu_percent(),
-            "memory_percent": psutil.virtual_memory().percent,
-            "uptime": time.time() - psutil.boot_time(),
             "process_id": os.getpid(),
+            "timestamp": time.time()
         }
         
         # Audio service check - just verify the directory exists
@@ -24,11 +21,10 @@ async def health_check():
         audio_service_ok = os.path.exists(audio_dir)
         
         # For prototype demo, we'll skip the real transcription check
-        # which might cause dependency issues
         transcription_ok = True  # Mock as available for prototype demo
         
         return {
-            "status": "ok",
+            "status": "healthy",
             "timestamp": time.time(),
             "system": system_health,
             "services": {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MockWebSocketProvider } from './MockWebSocketContext';
-import { RealWebSocketProvider } from './RealWebSocketContext';
+import { RealWebSocketProvider } from './RealWebSocketContext.fixed';
 import { useSettings } from '../hooks/useSettings';
 import { io } from 'socket.io-client';
 

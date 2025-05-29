@@ -9,18 +9,22 @@ Clarimeet is a next-generation AI-powered desktop application that can record, t
 - 📂 **Audio Upload & Processing** - Import audio files for offline transcription
 - 🧠 **Session Management** - Save, organize and export meeting data
 - 🪟 **Modern Floating UI** - Sleek interface with always-accessible panels
-- 📊 **System Health Monitoring** - Real-time status feedback on all system components
-- 📄 **Export Functionality** - Export transcripts and summaries in Markdown and PDF formats
+- 👥 **Speaker Diarization** - Identify and separate different speakers in transcriptions
+- 🌐 **Multi-language Support** - Support for 30+ languages with varying levels of capability
+- 🤖 **AI Chat Assistant** - Get answers and assistance during your meeting
+- 📄 **Export Functionality** - Export transcripts and summaries in various formats
 
-## 🛠️ Tech Stack
+## 🔬 Tech Stack
 
 - **Frontend**: React.js + Tailwind CSS
 - **Backend**: FastAPI (Python)
-- **Audio Input**: WASAPI (Windows) / BlackHole (Mac) / PulseAudio (Linux)
-- **Speech Recognition**: Whisper / Vosk
-- **Summarization**: BART or Pegasus (HuggingFace)
+- **Real-time Communication**: Socket.IO
+- **Audio Processing**: WebAudio API, pydub, librosa
+- **Speech Recognition**: Deepgram Nova-2 (free tier)
+- **Speaker Diarization**: Deepgram's speaker detection
+- **Summarization**: Google Gemini (free tier)
+- **Chat Assistant**: Google Gemini (free tier)
 - **Storage**: SQLite
-- **Live Stream**: WebSocket API
 
 ## 📋 Project Structure
 
@@ -40,15 +44,58 @@ clariimeet/
 
 ### Prerequisites
 
-- Python 3.10 (strongly recommended)
-  - **Important Note**: The ML components have compatibility issues with Python 3.12+
-  - If using Python 3.12+, see the Docker setup instructions below
+- Python 3.10+ (3.9+ should work for most features)
 - Node.js 16+
 - npm or yarn
-- For audio capture:
-  - Windows: Built-in support
-  - macOS: [BlackHole](https://github.com/ExistentialAudio/BlackHole) virtual audio driver
-  - Linux: PulseAudio
+- FFmpeg (for audio processing)
+
+### Installation
+
+#### 1. Clone the Repository
+
+```bash
+git clone https://github.com/yourusername/clarimeet.git
+cd clarimeet
+```
+
+#### 2. Set Up Backend
+
+```bash
+cd backend
+python -m venv venv
+# On Windows:
+venv\Scripts\activate
+# On macOS/Linux:
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+#### 3. Set Up API Keys (Free Tiers)
+
+Clarimeet uses free-tier AI services for transcription and summarization:
+
+1. **Deepgram API** ($200 free credit, no expiration)
+   - Sign up at: https://console.deepgram.com/signup
+   - Create a new API key in your dashboard
+   - No credit card required
+
+2. **Google Gemini API** (generous free tier)
+   - Get API key at: https://aistudio.google.com/app/apikey
+   - No credit card required
+
+Create a `.env` file in the `backend` directory with:
+
+```
+DEEPGRAM_API_KEY=your_deepgram_api_key_here
+GOOGLE_GEMINI_API_KEY=your_gemini_api_key_here
+```
+
+#### 4. Set Up Frontend
+
+```bash
+cd frontend
+npm install
+```
 
 ### Backend Setup
 
@@ -67,7 +114,6 @@ source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
-
 
 # Start the backend server
 uvicorn app.main:app --reload
@@ -96,32 +142,47 @@ This project uses several ML libraries that currently have compatibility issues 
 
 - **Recommended**: Use Python 3.10 for full functionality
 - **Alternative**: Use Docker with Python 3.10 image (see below)
-- **Workaround**: For Python 3.12+ users, some ML features use alternative implementations
+- **Workaround**: For Python 3.12+ users, some ML features will use simplified implementations
 
-### Docker Setup (For Python 3.12+ Users)
+### Docker Setup
 
 ```bash
-# Build Docker image with Python 3.10
-docker build -t clariimeet-backend .
+# Build Docker image
+docker build -t clarimeet-backend .
 
-# Run the container
-docker run -p 8000:8000 -d clariimeet-backend
+# Run the container with environment variables
+docker run -p 8000:8000 \
+  -e DEEPGRAM_API_KEY=your_deepgram_api_key_here \
+  -e GEMINI_API_KEY=your_gemini_api_key_here \
+  -d clarimeet-backend
 ```
 
 ## 📝 Project Status
 
-Clarimeet is currently in active development with the following status:
+Clarimeet has been fully implemented as a prototype with the following features:
 
 - ✅ Core application structure
-- ✅ WebSocket communication
-- ✅ UI components and layouts
-- ✅ System health monitoring
+- ✅ Socket.IO real-time communication
+- ✅ Modern responsive UI components
 - ✅ Session management
-- 🟡 Audio capture and processing (partially implemented)
-- 🟡 Transcription service (integration in progress)
-- 🟡 Summarization (integration in progress)
+- ✅ Audio processing
+- ✅ Transcription service with Deepgram
+- ✅ Speaker diarization
+- ✅ Multi-language support (30+ languages)
+- ✅ Real-time AI-powered summarization
+- ✅ AI Chat Assistant
+- ✅ Floating panel interface
 
-See [INTEGRATION_CHECKLIST.md](INTEGRATION_CHECKLIST.md) for more details.
+The application is now ready for prototype demonstration and testing.
+
+## 🔮 Future Enhancements
+
+- Full offline mode with local models
+- Expanded meeting analytics
+- Additional export formats
+- Authentication and user management
+- Team collaboration features
+- Mobile companion app
 
 ## 📝 License
 

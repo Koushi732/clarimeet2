@@ -12,14 +12,8 @@ import os
 import secrets
 from typing import List, Optional, Dict, Any, Union
 
-# Handle Pydantic v1 vs v2 imports
-try:
-    # Pydantic v2
-    from pydantic_settings import BaseSettings
-    from pydantic import Field
-except ImportError:
-    # Fallback to Pydantic v1
-    from pydantic import BaseSettings, Field
+# Use Pydantic v1 for compatibility
+from pydantic.v1 import BaseSettings, Field
 
 class Settings(BaseSettings):
     """

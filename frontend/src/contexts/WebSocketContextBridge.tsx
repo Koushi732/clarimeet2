@@ -7,7 +7,7 @@ export type WebSocketMessageType =
   | 'transcription' | 'summary' | 'audio_status' | 'session_update' | 'error' | 'ping' | 'pong' | 'audio_chunk'
   | 'client_connect' | 'connect_session' | 'recording_start' | 'session_connected' | 'session_error'
   | 'transcription_update' | 'summary_update' | 'transcription_status_update' | 'summarization_status_update'
-  | 'heartbeat' | 'chat_request' | 'chat_response' | 'message' | 'join_session' | 'register_client';
+  | 'heartbeat' | 'chat_request' | 'chat_response' | 'chat_message' | 'message' | 'join_session' | 'register_client';
 
 // Also export a constant object with the same message types for use at runtime
 export const MessageTypes = {
@@ -31,6 +31,7 @@ export const MessageTypes = {
   HEARTBEAT: 'heartbeat' as WebSocketMessageType,
   CHAT_REQUEST: 'chat_request' as WebSocketMessageType,
   CHAT_RESPONSE: 'chat_response' as WebSocketMessageType,
+  CHAT_MESSAGE: 'chat_message' as WebSocketMessageType,
   MESSAGE: 'message' as WebSocketMessageType,
   JOIN_SESSION: 'join_session' as WebSocketMessageType,
   REGISTER_CLIENT: 'register_client' as WebSocketMessageType

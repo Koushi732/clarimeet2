@@ -51,11 +51,9 @@ except ImportError:
 from app.database import engine, Base, SessionLocal
 from app.models import models
 # Import managers from utils package
-from app.utils import connection_manager, socketio_manager
-
-# Add debug prints to help troubleshoot imports
-print("Connection manager:", connection_manager)
-print("Socket.IO manager:", socketio_manager)
+# Import managers directly rather than through the utils package
+from app.utils.connection_manager import connection_manager
+from app.utils.socketio_manager import socketio_manager, sio
 from app.config import settings
 
 # Logger is already set up at the top of the file
@@ -110,7 +108,7 @@ os.makedirs(uploads_dir, exist_ok=True)
 app.mount("/downloads", StaticFiles(directory=uploads_dir), name="downloads")
 
 # Set up Socket.IO with the FastAPI app
-sio = socketio_manager.sio
+# sio is already imported directly from socketio_manager
 sio_app = socketio.ASGIApp(sio, app)
 
 # Socket.IO event handlers
@@ -131,33 +129,96 @@ async def connect(sid, environ):
     }, room=sid)
 
 @sio.event
-def disconnect(sid):
+async def disconnect(sid):
     """
     Handle Socket.IO disconnections.
     """
-    client_id = socketio_manager.get_client_id(sid)
-    logger.info(f"Socket.IO client disconnected: {sid}, client_id: {client_id}")
-    socketio_manager.remove_client(sid)
+    try:
+        client_id = socketio_manager.get_client_id(sid)
+        logger.info(f"Socket.IO connection disconnected: {sid}, client_id: {client_id}")
+        
+        # Use our enhanced disconnect method
+        if client_id:
+            await socketio_manager.disconnect_client(sid)
+    except Exception as e:
+        logger.error(f"Error handling disconnect: {e}")
 
 @sio.event
-def join_session(sid, data):
+async def chat_message(sid, data):
+    """
+    Handle chat messages from clients.
+    """
+    try:
+        # Validate request
+        if not isinstance(data, dict) or "message" not in data:
+            await sio.emit('error', {"message": "Invalid chat message format"}, room=sid)
+            return
+        
+        # Get client and session info
+        client_id = socketio_manager.get_client_id(sid)
+        session_id = socketio_manager.get_client_session(client_id)
+        
+        if not session_id:
+            await sio.emit('error', {"message": "You are not in a session"}, room=sid)
+            return
+        
+        # Log the message
+        logger.info(f"Chat message from {client_id} in session {session_id}: {data['message']}")
+        
+        # Send the user message to all clients in the session
+        user_message = {
+            "id": str(uuid.uuid4()),
+            "session_id": session_id,
+            "from": client_id,
+            "to": "all",
+            "message": data["message"],
+            "timestamp": time.time()
+        }
+        await sio.emit('chat_message', user_message, room=session_id)
+        
+        # Generate AI response using our chat service
+        await socketio_manager.handle_chat_message(session_id, client_id, data["message"])
+    except Exception as e:
+        logger.error(f"Error handling chat message: {e}")
+        await sio.emit('error', {"message": "Error processing chat message"}, room=sid)
+
+@sio.event
+async def join_session(sid, data):
     """
     Handle client joining a session.
     """
-    client_id = socketio_manager.get_client_id(sid)
-    session_id = data.get('session_id')
-    
-    if not session_id:
-        sio.emit('error', {"message": "Session ID is required"}, room=sid)
-        return
+    try:
+        client_id = socketio_manager.get_client_id(sid)
+        if not client_id:
+            logger.error(f"No client ID found for SID {sid}")
+            await sio.emit('error', {"message": "Client not identified"}, room=sid)
+            return
+            
+        session_id = data.get('session_id')
+        if not session_id:
+            logger.error("No session ID provided")
+            await sio.emit('error', {"message": "No session ID provided"}, room=sid)
+            return
+            
+        # Join the session room
+        await sio.enter_room(sid, session_id)
         
-    logger.info(f"Client {client_id} joining session {session_id}")
-    socketio_manager.join_room(sid, session_id)
-    sio.emit('session_joined', {
-        "status": "connected", 
-        "session_id": session_id,
-        "message": f"Joined session {session_id}"
-    }, room=sid)
+        # Store the association in our mapping
+        socketio_manager.join_session(client_id, session_id)
+        
+        # Ensure real-time services are running for this session
+        await socketio_manager._ensure_real_services(session_id)
+        
+        logger.info(f"Client {client_id} joined session {session_id}")
+        
+        # Send confirmation to the client
+        await sio.emit('join_response', {
+            "status": "success",
+            "session_id": session_id,
+            "client_id": client_id
+        }, room=sid)
+    except Exception as e:
+        logger.error(f"Error handling join_session: {e}")
 
 @sio.event
 async def audio_chunk(sid, data):
@@ -184,76 +245,46 @@ async def audio_chunk(sid, data):
             return
         
         # Handle data depending on format (binary blob or base64 string)
-        audio_data = None
+        audio_bytes = None
         if isinstance(data, (bytes, bytearray)):
-            audio_data = data
+            # Direct binary data
+            audio_bytes = data
+            logger.debug(f"Received binary audio data: {len(audio_bytes)} bytes")
         elif isinstance(data, dict) and data.get('audio'):
             # Extract audio data from JSON payload
             if isinstance(data['audio'], str):
                 # Handle base64 encoded string
                 try:
                     import base64
-                    audio_data = base64.b64decode(data['audio'])
+                    audio_bytes = base64.b64decode(data['audio'])
+                    logger.debug(f"Decoded base64 audio data: {len(audio_bytes)} bytes")
                 except Exception as e:
                     logger.error(f"Error decoding base64 audio: {e}")
                     await sio.emit('error', {"message": "Error decoding audio data"}, room=sid)
                     return
+            elif isinstance(data['audio'], (bytes, bytearray)):
+                # Handle binary data in JSON
+                audio_bytes = data['audio']
+                logger.debug(f"Extracted binary audio from JSON: {len(audio_bytes)} bytes")
         
-        if not audio_data:
+        if not audio_bytes:
             logger.warning(f"No processable audio data from client {client_id}")
             await sio.emit('error', {"message": "No processable audio data"}, room=sid)
             return
         
-        # Create temporary file for audio processing
-        temp_file = None
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as temp:
-                temp.write(audio_data)
-                temp_file = temp.name
-            
-            # In a real implementation, you would process the audio file here
-            # For example, using SpeechRecognition, Whisper, or another transcription service
-            # For now, we'll use a placeholder response
-            
-            # Simulate processing delay
-            await asyncio.sleep(0.5)
-            
-            # Generate a more realistic response
-            import random
-            responses = [
-                "Hello, this is a test transcription.",
-                "Testing the audio processing pipeline.",
-                "This is a simulated transcription response.",
-                "The audio chunk was processed successfully.",
-                "Socket.IO is working correctly with audio data."
-            ]
-            transcription_text = random.choice(responses)
-            
-            # Send transcription result to the client
-            await sio.emit('transcription', {
-                "text": transcription_text,
-                "timestamp": time.time(),
-                "final": True,
-                "session_id": session_id
-            }, room=sid)
+        # Process audio using our real transcription service
+        from app.utils.deepgram_transcription import transcription_service
+        
+        # Process the audio chunk with our transcription service
+        result = await transcription_service.process_audio_chunk(session_id, audio_bytes)
+        
+        if result:
+            # Forward the result to the client
+            await sio.emit('transcription_update', result, room=sid)
             
             # Also broadcast to the session room if needed
             # This allows all clients in the session to see the transcription
-            await sio.emit('transcription', {
-                "text": transcription_text,
-                "timestamp": time.time(),
-                "final": True,
-                "session_id": session_id,
-                "speaker": client_id  # Identify the speaker
-            }, room=session_id)
-            
-        finally:
-            # Clean up temporary file
-            if temp_file and os.path.exists(temp_file):
-                try:
-                    os.unlink(temp_file)
-                except Exception as e:
-                    logger.error(f"Error removing temporary file: {e}")
+            await sio.emit('transcription_update', result, room=session_id)
     
     except Exception as e:
         logger.error(f"Error processing audio chunk: {e}")

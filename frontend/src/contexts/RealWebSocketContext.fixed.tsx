@@ -38,9 +38,11 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
   const EVENT_NAMES = {
     CONNECTION_STATUS: 'connection_status',
     JOIN_SESSION: 'join_session',
-    SESSION_JOINED: 'session_joined',
+    JOIN_RESPONSE: 'join_response',    // Updated event name
     AUDIO_CHUNK: 'audio_chunk',
-    TRANSCRIPTION: 'transcription',
+    TRANSCRIPTION_UPDATE: 'transcription_update',  // Updated for Deepgram
+    SUMMARY_UPDATE: 'summary_update',              // Updated for Gemini
+    CHAT_MESSAGE: 'chat_message',                  // Single event for both sending and receiving
     ERROR: 'error',
     MESSAGE: 'message'
   };
@@ -66,7 +68,7 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
       return apiUrl;
     } else {
       // Default to local server with explicit protocol
-      return `http://localhost:8001`; // Force localhost instead of hostname
+      return `http://localhost:8000`; // Force localhost instead of hostname
     }
   }, []);
 
@@ -96,7 +98,7 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
         payload = message.data;
         break;
       case 'transcription': // Previously WebSocketMessageType.TRANSCRIPTION
-        eventName = EVENT_NAMES.TRANSCRIPTION;
+        eventName = EVENT_NAMES.TRANSCRIPTION_UPDATE;
         payload = message.data;
         break;
       default:
@@ -129,7 +131,7 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
       socketRef.current.emit(EVENT_NAMES.JOIN_SESSION, joinData);
       
       // Set up listener for session join confirmation
-      socketRef.current.once(EVENT_NAMES.SESSION_JOINED, (data) => {
+      socketRef.current.once(EVENT_NAMES.JOIN_RESPONSE, (data) => {
         console.log(`Successfully joined session: ${newSessionId}`, data);
         setIsConnectedToSession(true);
       });
@@ -257,10 +259,10 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
       });
       
       // Set up listeners for specific event types
-      socket.on(EVENT_NAMES.TRANSCRIPTION, (data) => {
-        console.log('Received transcription event with data:', data);
+      socket.on(EVENT_NAMES.TRANSCRIPTION_UPDATE, (data) => {
+        console.log('Received transcription update:', data);
         const message = { 
-          type: 'transcription', // Previously WebSocketMessageType.TRANSCRIPTION 
+          type: 'transcription', // Keep the same type for backward compatibility 
           data: data,
           timestamp: Date.now(),
           sessionId: data.session_id || sessionId
@@ -287,6 +289,35 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
           setStatus('open');
         }
       });
+      
+      // Handle summary events
+      socket.on(EVENT_NAMES.SUMMARY_UPDATE, (data) => {
+        console.log('Received summary update:', data);
+        const message = { 
+          type: 'summary', 
+          data: data,
+          timestamp: Date.now(),
+          sessionId: data.session_id || sessionId
+        };
+        setLastMessage(message);
+        notifyMessageHandlers(message);
+      });
+      
+      // Handle chat message events
+      socket.on(EVENT_NAMES.CHAT_MESSAGE, (data) => {
+        console.log('Received chat message:', data);
+        const message = { 
+          type: 'chat_message', 
+          data: data,
+          timestamp: Date.now(),
+          sessionId: data.session_id || sessionId
+        };
+        setLastMessage(message);
+        notifyMessageHandlers(message);
+      });
+      
+      // Note: We now use a single chat_message event for both user messages and AI responses
+      // The 'from' field in the message indicates whether it's from a user or the assistant
       
       socket.on(EVENT_NAMES.MESSAGE, (data) => {
         console.log('Received generic message:', data);

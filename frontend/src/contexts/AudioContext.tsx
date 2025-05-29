@@ -482,11 +482,21 @@ export const AudioProvider = ({ children }: { children: React.ReactNode }) => {
     
       // Update duration
       statusPollingRef.current = setInterval(() => {
-        setRecordingStatus(prev => prev ? {
-          ...prev,
-          duration: prev.duration + 1,
-          audioLevel: audioLevelRef.current
-        } : null);
+        // Use ref to prevent unnecessary re-renders
+        if (recordingStatus) {
+          setRecordingStatus(prev => {
+            if (!prev) return null;
+            // Only update if values actually changed
+            if (prev.duration + 1 === prev.duration && prev.audioLevel === audioLevelRef.current) {
+              return prev; // No change
+            }
+            return {
+              ...prev,
+              duration: prev.duration + 1,
+              audioLevel: audioLevelRef.current
+            };
+          });
+        }
       }, 1000);
       
       return sessionId;
@@ -556,7 +566,8 @@ export const AudioProvider = ({ children }: { children: React.ReactNode }) => {
       
       // Tell backend to stop transcription
       try {
-        await axios.post(`/api/sessions/${sessionId}/transcription/stop`);
+        await axios.post(`/api/transcription/${sessionId}/stop`);
+        console.log('Successfully stopped transcription on backend');
       } catch (apiError) {
         console.error('Error stopping transcription on backend:', apiError);
         // Continue with cleanup even if API call fails

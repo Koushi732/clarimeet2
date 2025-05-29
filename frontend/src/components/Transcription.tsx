@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useSession } from "../contexts/SessionContext";
 import { useSettings } from "../hooks/useSettings";
-import { useRealWebSocket } from "../contexts/RealWebSocketContext";
+import { useRealWebSocket } from "../contexts/RealWebSocketContext.fixed";
 import { WebSocketMessage, WebSocketMessageType, MessageTypes } from "../contexts/WebSocketContextBridge";
 import styles from "../styles/Transcription.module.css";
 
@@ -31,13 +31,34 @@ const Transcription: React.FC<TranscriptionProps> = ({ onNewTranscription }) => 
     const handleMessage = (message: WebSocketMessage) => {
       if (message.type === MessageTypes.TRANSCRIPTION) {
         console.log("Received transcription:", message.data);
+        
+        // Handle Deepgram transcription format
         if (message.data?.text) {
-          // Format with timestamp if available
-          const formattedText = message.data.final 
-            ? `${message.data.text} ` // Final transcription
-            : `${message.data.text} `; // Interim transcription
+          // Check if we have speaker data
+          const speakerPrefix = message.data.speaker_id 
+            ? `[${message.data.speaker_name || 'Speaker ' + message.data.speaker_id}] ` 
+            : '';
             
-          setTranscription(prev => prev + formattedText);
+          // Format with speaker and finality
+          const formattedText = message.data.is_final 
+            ? `${speakerPrefix}${message.data.text} ` // Final transcription
+            : `${speakerPrefix}${message.data.text} `; // Interim transcription
+            
+          // Only add final transcriptions or first interim if empty
+          if (message.data.is_final || transcription === "") {
+            setTranscription(prev => prev + formattedText);
+          } else {
+            // Replace the last interim transcription
+            setTranscription(prev => {
+              // Find the last sentence and replace it
+              const sentences = prev.split('. ');
+              if (sentences.length > 1) {
+                sentences[sentences.length - 1] = formattedText;
+                return sentences.join('. ');
+              }
+              return formattedText; // Just replace everything if it's the first sentence
+            });
+          }
           
           if (onNewTranscription) {
             onNewTranscription(message.data.text);
