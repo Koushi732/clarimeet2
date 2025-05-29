@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { MicrophoneIcon, ChartBarIcon, ChatBubbleLeftRightIcon, XMarkIcon } from '@heroicons/react/24/solid';
-import { useAudio } from '../../contexts/AudioContext';
-import { useWebSocketBridge } from '../../contexts/WebSocketContextBridge';
+import React, { useState, useEffect, useRef } from 'react';
+import { XMarkIcon, ArrowsPointingOutIcon, ArrowsPointingInIcon, Cog6ToothIcon, MicrophoneIcon, DocumentTextIcon, PaperAirplaneIcon, UserIcon, ChartBarIcon, ChatBubbleLeftRightIcon } from '@heroicons/react/24/solid';
+import { useWebSocketBridge, WebSocketMessageType, MessageTypes } from '../../contexts/WebSocketContextBridge';
 import { useSession } from '../../contexts/SessionContext';
+import { useAudio } from '../../contexts/AudioContext';
 
 /**
  * A simple, reliable floating panel that works without complex WebSocket handling
@@ -40,7 +40,7 @@ const SimpleFloatingPanel: React.FC = () => {
       console.log('Setting up WebSocket handlers for real data');
       
       // Handle transcription updates
-      const removeTranscriptionHandler = addMessageHandler('transcription', (data) => {
+      const removeTranscriptionHandler = addMessageHandler(MessageTypes.TRANSCRIPTION, (data) => {
         console.log('Received transcription update:', data);
         if (data && data.text) {
           setTranscriptions(prev => [
@@ -55,7 +55,7 @@ const SimpleFloatingPanel: React.FC = () => {
       });
       
       // Handle summary updates
-      const removeSummaryHandler = addMessageHandler('summary', (data) => {
+      const removeSummaryHandler = addMessageHandler(MessageTypes.SUMMARY, (data) => {
         console.log('Received summary update:', data);
         if (data && data.text) {
           setSummaries(prev => [
@@ -104,56 +104,36 @@ const SimpleFloatingPanel: React.FC = () => {
         return;
       }
       
-      console.log('Using mock data for disconnected mode');
-      // Simulate receiving new transcriptions and summaries when not connected to WebSocket
-      const transcriptionInterval = setInterval(() => {
-        const mockPhrases = [
-          "We need to focus on expanding our market reach.",
-          "The new product launch is scheduled for next month.",
-          "Customer satisfaction scores have improved significantly.",
-          "We should allocate more resources to research and development.",
-          "The marketing team has proposed a new campaign strategy."
-        ];
-        
-        const randomPhrase = mockPhrases[Math.floor(Math.random() * mockPhrases.length)];
-        
-        setTranscriptions(prev => [
-          ...prev, 
-          { 
-            id: `tr-${Date.now()}`, 
-            text: randomPhrase, 
-            timestamp: Date.now()/1000 
-          }
-        ]);
-      }, 10000); // New transcription every 10 seconds
+      console.log('WebSocket disconnected. Please check your connection to the server.');
       
-      const summaryInterval = setInterval(() => {
-        setSummaries(prev => [
-          ...prev,
-          {
-            id: `sum-${Date.now()}`,
-            text: `Summary update: The meeting focused on ${transcriptions.length > 2 ? 
-              transcriptions[transcriptions.length-2].text.toLowerCase() : 
-              'business growth and strategy'}. Key points discussed include product launch plans and market expansion.`,
-            timestamp: Date.now()/1000,
-            summary_type: 'incremental'
-          }
-        ]);
-      }, 30000); // New summary every 30 seconds
+      // Display connection status instead of mock data
+      setTranscriptions(prev => [
+        ...prev, 
+        { 
+          id: `connection-status-${Date.now()}`, 
+          text: "WebSocket disconnected. Please check your network connection and server status.", 
+          timestamp: Date.now()/1000 
+        }
+      ]);
       
-      return () => {
-        clearInterval(transcriptionInterval);
-        clearInterval(summaryInterval);
-      };
+      // No mock data intervals - waiting for real connection
+      const connectionStatusInterval = setInterval(() => {
+        // Check connection status every 5 seconds
+        if (!connected) {
+          console.log('Still disconnected from WebSocket. Waiting for connection...');
+        }
+      }, 5000);
+      
+      return () => clearInterval(connectionStatusInterval);
     } else {
       setIsVisible(false);
     }
-  }, [recordingStatus, connected, currentSession, transcriptions.length, sendMessage]);
+  }, [recordingStatus, connected, currentSession, sendMessage]);
   
   // Setup WebSocket handler for chat responses
   useEffect(() => {
     if (connected) {
-      const removeChatHandler = addMessageHandler('chat_response', (data) => {
+      const removeChatHandler = addMessageHandler(MessageTypes.CHAT_RESPONSE, (data) => {
         console.log('Received chat response:', data);
         if (data && data.message) {
           setChatMessages(prev => [
@@ -198,17 +178,17 @@ const SimpleFloatingPanel: React.FC = () => {
       
       if (!success) {
         console.warn('Failed to send chat message via WebSocket, using fallback');
-        useFallbackChatResponse();
+        generateFallbackChatResponse();
       }
     } else {
       // Use fallback if not connected
       console.log('Using fallback chat response (not connected to WebSocket)');
-      useFallbackChatResponse();
+      generateFallbackChatResponse();
     }
   };
   
   // Fallback chat response generator
-  const useFallbackChatResponse = () => {
+  const generateFallbackChatResponse = () => {
     setTimeout(() => {
       const responses = [
         "Based on the transcription, the team is focusing on market expansion strategies.",

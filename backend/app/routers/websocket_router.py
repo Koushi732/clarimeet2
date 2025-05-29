@@ -59,8 +59,13 @@ async def connect_session(websocket: WebSocket, session_id: str, client_id: Opti
     if not client_id:
         client_id = str(uuid.uuid4())
     
-    # Accept the connection and register it with the connection manager
-    await connection_manager.connect(client_id, websocket)
+    logger.info(f"WebSocket connection attempt for system status feed from client {client_id}")
+    # Explicitly accept the connection first
+    await websocket.accept()
+    logger.info(f"WebSocket connection accepted for system status feed, client {client_id}")
+    
+    # Register with the connection manager (with already_accepted=True)
+    await connection_manager.connect(client_id, websocket, already_accepted=True)
     
     try:
         # Send initial status
@@ -123,8 +128,13 @@ async def live_transcription_feed(websocket: WebSocket, session_id: str, client_
     # Session key to track active transcription sessions
     session_key = f"{session_id}_{client_id}"
     
-    # Accept the connection and register it with the connection manager
-    await connection_manager.connect(client_id, websocket)
+    logger.info(f"WebSocket connection attempt for system status feed from client {client_id}")
+    # Explicitly accept the connection first
+    await websocket.accept()
+    logger.info(f"WebSocket connection accepted for system status feed, client {client_id}")
+    
+    # Register with the connection manager (with already_accepted=True)
+    await connection_manager.connect(client_id, websocket, already_accepted=True)
     
     try:
         # Start transcription service in a separate task if not already running
@@ -221,8 +231,13 @@ async def summary_updates_feed(websocket: WebSocket, session_id: str, client_id:
     if not client_id:
         client_id = str(uuid.uuid4())
     
-    # Accept the connection and register it with the connection manager
-    await connection_manager.connect(client_id, websocket)
+    logger.info(f"WebSocket connection attempt for system status feed from client {client_id}")
+    # Explicitly accept the connection first
+    await websocket.accept()
+    logger.info(f"WebSocket connection accepted for system status feed, client {client_id}")
+    
+    # Register with the connection manager (with already_accepted=True)
+    await connection_manager.connect(client_id, websocket, already_accepted=True)
     
     try:
         # Register this client for summary updates
@@ -299,8 +314,13 @@ async def audio_stream(websocket: WebSocket, session_id: str, client_id: Optiona
     # Create a session key
     session_key = f"{session_id}_{client_id}"
     
-    # Accept the connection and register it with the connection manager
-    await connection_manager.connect(client_id, websocket)
+    logger.info(f"WebSocket connection attempt for system status feed from client {client_id}")
+    # Explicitly accept the connection first
+    await websocket.accept()
+    logger.info(f"WebSocket connection accepted for system status feed, client {client_id}")
+    
+    # Register with the connection manager (with already_accepted=True)
+    await connection_manager.connect(client_id, websocket, already_accepted=True)
     
     # Initialize audio processing for this session
     audio_processing_sessions[session_key] = {
@@ -467,8 +487,13 @@ async def system_status_feed(websocket: WebSocket, client_id: Optional[str] = No
     if not client_id:
         client_id = str(uuid.uuid4())
     
-    # Accept the connection and register it with the connection manager
-    await connection_manager.connect(client_id, websocket)
+    logger.info(f"WebSocket connection attempt for system status feed from client {client_id}")
+    # Explicitly accept the connection first
+    await websocket.accept()
+    logger.info(f"WebSocket connection accepted for system status feed, client {client_id}")
+    
+    # Register with the connection manager (with already_accepted=True)
+    await connection_manager.connect(client_id, websocket, already_accepted=True)
     
     try:
         # Send initial system status

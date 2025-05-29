@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ChartBarIcon, XMarkIcon, DocumentTextIcon } from '@heroicons/react/24/solid';
 import { useSession } from '../../contexts/SessionContext';
 import { useAudio } from '../../contexts/AudioContext';
-import { useWebSocketBridge } from '../../contexts/WebSocketContextBridge';
+import { useWebSocketBridge, WebSocketMessageType, MessageTypes } from '../../contexts/WebSocketContextBridge';
 
 /**
  * A floating panel that displays real-time meeting summaries
@@ -51,7 +51,7 @@ const FloatingSummaryPanel: React.FC = () => {
   // Register direct message handler for summary updates
   useEffect(() => {
     // Add direct message handler
-    const removeHandler = addMessageHandler('summary_update', (data) => {
+    const removeHandler = addMessageHandler(MessageTypes.SUMMARY_UPDATE, (data) => {
       console.log('Direct summary handler received data:', data);
       if (!data) return;
       

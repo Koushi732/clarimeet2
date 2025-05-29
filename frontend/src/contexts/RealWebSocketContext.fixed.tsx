@@ -4,7 +4,7 @@ import { io, Socket } from 'socket.io-client';
 import { WebSocketStatus } from '../hooks/useWebSocket';
 import { WebSocketMessage, WebSocketMessageType, MessageTypes } from './WebSocketContextBridge';
 
-// MessageTypes.MESSAGE is now properly defined in WebSocketContextBridge.tsx
+// WebSocketMessageType.MESSAGE is now properly defined in the enum
 
 interface RealWebSocketContextType {
   status: WebSocketStatus;
@@ -65,8 +65,8 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
     if (apiUrl) {
       return apiUrl;
     } else {
-      // Default to local server
-      return `http://${window.location.hostname}:8000`;
+      // Default to local server with explicit protocol
+      return `http://localhost:8001`; // Force localhost instead of hostname
     }
   }, []);
 
@@ -88,14 +88,14 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
     let payload: any;
     
     switch (message.type) {
-      case MessageTypes.JOIN_SESSION:
+      case 'connect_session': // Previously WebSocketMessageType.JOIN_SESSION
         // Special case for join session
         return; // This is handled separately
-      case MessageTypes.AUDIO_CHUNK:
+      case 'audio_chunk': // Previously WebSocketMessageType.AUDIO_CHUNK
         eventName = EVENT_NAMES.AUDIO_CHUNK;
         payload = message.data;
         break;
-      case MessageTypes.TRANSCRIPTION:
+      case 'transcription': // Previously WebSocketMessageType.TRANSCRIPTION
         eventName = EVENT_NAMES.TRANSCRIPTION;
         payload = message.data;
         break;
@@ -154,15 +154,22 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
         socketRef.current.disconnect();
       }
       
-      // Create new Socket.IO connection with auto-reconnection
+      // Create new Socket.IO connection with improved connection settings
+      console.log(`Attempting Socket.IO connection to ${serverUrl} with client ID ${clientId}`);
+      
+      // Force new connection and use more permissive settings
       const socket = io(serverUrl, {
-        reconnectionAttempts: 5,  // Reduced to prevent excessive reconnection attempts
-        reconnectionDelay: 2000,  // Start with a longer delay
-        reconnectionDelayMax: 10000,
-        randomizationFactor: 0.3,
-        timeout: 10000,  // Shorter timeout for faster failure detection
+        reconnection: true,
+        reconnectionAttempts: Infinity,  // Keep trying forever
+        reconnectionDelay: 1000,  // Start with a shorter delay
+        reconnectionDelayMax: 5000,
+        randomizationFactor: 0.5,
+        timeout: 20000,  // Longer timeout for slower connections
         autoConnect: true,
-        transports: ['websocket', 'polling'],  // Always use both transports
+        forceNew: true,  // Force a new connection
+        transports: ['polling', 'websocket'],  // Try polling first, then websocket
+        upgrade: true,  // Allow transport upgrade
+        rememberUpgrade: true,
         query: { clientId }
       });
       
@@ -194,28 +201,48 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
         setStatus('closed');
         setIsConnectedToSession(false);
         
-        // Handle specific disconnect reasons
-        if (reason === 'io server disconnect') {
-          // Server disconnected us, manual reconnect needed
-          console.log('Server disconnected the client, attempting manual reconnection...');
-          socket.connect();
+        // Handle all disconnect reasons with a reconnection attempt
+        console.log(`Disconnected: ${reason}. Attempting manual reconnection...`);
+        
+        // Clear any existing reconnect timer
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
         }
+        
+        // Schedule a reconnection attempt
+        reconnectTimerRef.current = setTimeout(() => {
+          console.log('Attempting manual reconnection after disconnect');
+          try {
+            socket.connect();
+          } catch (error) {
+            console.error('Error reconnecting:', error);
+            // Try a completely new connection
+            connect();
+          }
+        }, 2000);
       });
       
       socket.on('connect_error', (error) => {
-        console.error('Socket.IO connection error:', error);
+        console.error(`Socket.IO connection error: ${error.message}`);
         setStatus('error');
-        reconnectAttemptsRef.current++;
         
-        // Implement manual backoff for persistent errors
-        if (reconnectAttemptsRef.current > 3) {
-          console.log('Multiple connection errors, implementing manual backoff...');
-          // Clear any existing reconnect timer
-          if (reconnectTimerRef.current) {
-            clearTimeout(reconnectTimerRef.current);
-          }
+        // Log more details about the error
+        console.log('Connection error details:', {
+          errorMessage: error.message,
+          transport: socket.io.engine?.transport?.name,
+          url: serverUrl,
+          readyState: socket.io.engine?.readyState
+        });
+        
+        // Don't disconnect - let Socket.IO's built-in reconnection handle it
+        reconnectAttemptsRef.current += 1;
+        
+        if (reconnectAttemptsRef.current % 3 === 0) {
+          // Every 3 attempts, try recreating the socket entirely
+          console.log('Multiple connection errors, recreating socket connection...');
+          socket.disconnect();
           
-          // Calculate backoff delay with jitter
+          // Schedule a complete reconnect with exponential backoff
           const backoffDelay = Math.min(
             15000, // Max 15 seconds
             1000 * Math.pow(1.5, reconnectAttemptsRef.current) + Math.random() * 1000
@@ -223,7 +250,7 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
           
           console.log(`Will attempt reconnection in ${backoffDelay}ms`);
           reconnectTimerRef.current = setTimeout(() => {
-            console.log('Attempting reconnection after backoff...');
+            console.log('Attempting full socket recreation...');
             connect();
           }, backoffDelay);
         }
@@ -233,7 +260,7 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
       socket.on(EVENT_NAMES.TRANSCRIPTION, (data) => {
         console.log('Received transcription event with data:', data);
         const message = { 
-          type: MessageTypes.TRANSCRIPTION, 
+          type: 'transcription', // Previously WebSocketMessageType.TRANSCRIPTION 
           data: data,
           timestamp: Date.now(),
           sessionId: data.session_id || sessionId
@@ -245,7 +272,7 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
       socket.on(EVENT_NAMES.ERROR, (data) => {
         console.error('Received error event:', data);
         const message = { 
-          type: MessageTypes.ERROR, 
+          type: 'error', 
           data: data,
           timestamp: Date.now()
         };
@@ -264,7 +291,7 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
       socket.on(EVENT_NAMES.MESSAGE, (data) => {
         console.log('Received generic message:', data);
         const message = { 
-          type: MessageTypes.MESSAGE, 
+          type: 'message', 
           data: data,
           timestamp: Date.now()
         };
@@ -305,7 +332,24 @@ export const RealWebSocketProvider: FC<RealWebSocketProviderProps> = ({ children
     }
   }, [sessionId, joinSession]);
 
-  // Send a message through the WebSocket
+  // Utility function to get a debug-friendly session status string
+  const getSessionStatusText = useCallback(() => {
+    if (!sessionId) {
+      return 'No session selected';
+    }
+
+    if (status !== 'open') {
+      return `Socket not connected (${status})`;
+    }
+
+    if (!isConnectedToSession) {
+      return `Not joined to session ${sessionId}`;
+    }
+
+    return `Connected to session ${sessionId}`;
+  }, [sessionId, status, isConnectedToSession]);
+  
+  // Send a message through the WebSocket - declared first to avoid circular reference
   const sendMessage = useCallback((message: any): boolean => {
     if (!socketRef.current) {
       console.warn('Cannot send message, socket not initialized');

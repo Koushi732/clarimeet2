@@ -7,7 +7,34 @@ export type WebSocketMessageType =
   | 'transcription' | 'summary' | 'audio_status' | 'session_update' | 'error' | 'ping' | 'pong' | 'audio_chunk'
   | 'client_connect' | 'connect_session' | 'recording_start' | 'session_connected' | 'session_error'
   | 'transcription_update' | 'summary_update' | 'transcription_status_update' | 'summarization_status_update'
-  | 'heartbeat' | 'chat_request' | 'chat_response';
+  | 'heartbeat' | 'chat_request' | 'chat_response' | 'message' | 'join_session' | 'register_client';
+
+// Also export a constant object with the same message types for use at runtime
+export const MessageTypes = {
+  TRANSCRIPTION: 'transcription' as WebSocketMessageType,
+  SUMMARY: 'summary' as WebSocketMessageType,
+  AUDIO_STATUS: 'audio_status' as WebSocketMessageType,
+  SESSION_UPDATE: 'session_update' as WebSocketMessageType,
+  ERROR: 'error' as WebSocketMessageType,
+  PING: 'ping' as WebSocketMessageType,
+  PONG: 'pong' as WebSocketMessageType,
+  AUDIO_CHUNK: 'audio_chunk' as WebSocketMessageType,
+  CLIENT_CONNECT: 'client_connect' as WebSocketMessageType,
+  CONNECT_SESSION: 'connect_session' as WebSocketMessageType,
+  RECORDING_START: 'recording_start' as WebSocketMessageType,
+  SESSION_CONNECTED: 'session_connected' as WebSocketMessageType,
+  SESSION_ERROR: 'session_error' as WebSocketMessageType,
+  TRANSCRIPTION_UPDATE: 'transcription_update' as WebSocketMessageType,
+  SUMMARY_UPDATE: 'summary_update' as WebSocketMessageType,
+  TRANSCRIPTION_STATUS_UPDATE: 'transcription_status_update' as WebSocketMessageType,
+  SUMMARIZATION_STATUS_UPDATE: 'summarization_status_update' as WebSocketMessageType,
+  HEARTBEAT: 'heartbeat' as WebSocketMessageType,
+  CHAT_REQUEST: 'chat_request' as WebSocketMessageType,
+  CHAT_RESPONSE: 'chat_response' as WebSocketMessageType,
+  MESSAGE: 'message' as WebSocketMessageType,
+  JOIN_SESSION: 'join_session' as WebSocketMessageType,
+  REGISTER_CLIENT: 'register_client' as WebSocketMessageType
+};
 
 export interface WebSocketMessage {
   type: WebSocketMessageType;

@@ -9,13 +9,20 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 speechrecognition==3.10.0
 pydub==0.25.1
-pyaudio==0.2.13
+# PyAudio needs to be installed separately:
+# Windows: pip install https://download.lfd.uci.edu/pythonlibs/archived/pyaudio/PyAudio-0.2.11-cp310-cp310-win_amd64.whl
+# macOS: brew install portaudio && pip install pyaudio
+# Linux: sudo apt-get install python3-pyaudio
+# pyaudio==0.2.13
 sounddevice==0.4.6
 soundfile==0.12.1
 transformers==4.34.1
-torch==2.1.0
+torch>=2.2.0
 numpy==1.26.0
 pandas==2.1.1
+# Socket.IO dependencies
+python-socketio>=5.7.0
+fastapi-socketio>=0.0.10
 # For Windows audio capture
 pywin32==306; sys_platform == 'win32'
 # For MacOS audio capture (user needs to install BlackHole separately)

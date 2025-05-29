@@ -1,14 +1,15 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import axios from 'axios';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { useWebSocketBridge, WebSocketMessageType, MessageTypes } from './WebSocketContextBridge';
 import { 
   SessionDetail, 
   Transcription, 
   Summary, 
-  TranscriptionStatus as ImportedTranscriptionStatus, 
-  SummarizationStatus as ImportedSummarizationStatus, 
-  ActiveSession 
+  TranscriptionStatus,
+  SummarizationStatus,
+  ActiveSession,
+  Session as SessionType
 } from '../types';
-import { useWebSocketBridge, WebSocketMessageType, WebSocketMessage } from './WebSocketContextBridge';
+import axios from 'axios';
 
 // Update Session interface to include status field
 interface Session {
@@ -103,8 +104,8 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
     console.log(`Processing message for session ${sessionId}`);
     
     switch(lastMessage.type) {
-      case 'transcription_update':
-      case 'transcription': // Handle both message types
+      case MessageTypes.TRANSCRIPTION_UPDATE:
+      case MessageTypes.TRANSCRIPTION: // Handle both message types
         let transcription;
         if (typeof lastMessage.data === 'string') {
           // Parse if the data is a string
@@ -143,8 +144,8 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
         break;
         
-      case 'summary_update':
-      case 'summary': // Handle both message types
+      case MessageTypes.SUMMARY_UPDATE:
+      case MessageTypes.SUMMARY: // Handle both message types
         let summary;
         if (typeof lastMessage.data === 'string') {
           // Parse if the data is a string
@@ -184,27 +185,31 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         break;
         
       case 'transcription_status_update':
-        const transStatus = lastMessage.data as ImportedTranscriptionStatus;
-        const transStatusSessionId = transStatus.sessionId;
+        const newStatus = lastMessage.data as TranscriptionStatus;
+        // Convert string status to enum if needed
+        const status = newStatus.status as TranscriptionStatus['status'];
+        const transStatusSessionId = newStatus.sessionId;
         
         if (transStatusSessionId === sessionId || !transStatusSessionId) {
-          console.log('Updating transcription status:', transStatus);
+          console.log('Updating transcription status:', newStatus);
           setCurrentSession(prev => {
             if (!prev) return null;
             return {
               ...prev,
-              transcriptionStatus: transStatus
+              transcriptionStatus: newStatus
             };
           });
         }
         break;
         
       case 'summarization_status_update':
-        const summStatus = lastMessage.data as ImportedSummarizationStatus;
-        const summStatusSessionId = summStatus.sessionId;
+        const newSummStatus = lastMessage.data as SummarizationStatus;
+        // Convert string status to enum if needed
+        const summStatus = newSummStatus.status as SummarizationStatus['status'];
+        const summStatusSessionId = newSummStatus.sessionId;
         
         if (summStatusSessionId === sessionId || !summStatusSessionId) {
-          console.log('Updating summarization status:', summStatus);
+          console.log('Updating summarization status:', newSummStatus);
           setCurrentSession(prev => {
             if (!prev) return null;
             return {
@@ -216,9 +221,9 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         break;
         
       // Handle any other message types
-      case 'audio_status':
-      case 'session_update':
-      case 'error':
+      case MessageTypes.AUDIO_STATUS:
+      case MessageTypes.SESSION_UPDATE:
+      case MessageTypes.ERROR:
         console.log(`Received ${lastMessage.type} message:`, lastMessage.data);
         break;
         
