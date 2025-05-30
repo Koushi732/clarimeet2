@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSession } from '../../contexts/SessionContext';
-import { useAudio } from '../../contexts/AudioContext';
+import { useAudio } from '../../contexts/SimpleAudioContext';
 import EnhancedMiniTab from './EnhancedMiniTab';
 import { isElectron } from '../../utils/electronBridge';
 

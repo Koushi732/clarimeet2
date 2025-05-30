@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Draggable from 'react-draggable';
 import { useSession } from '../../contexts/SessionContext';
 import { isElectron, createStatusPanel } from '../../utils/electronBridge';
-import { useAudio } from '../../contexts/AudioContext';
+import { useAudio } from '../../contexts/SimpleAudioContext';
 
 // Icons
 import {

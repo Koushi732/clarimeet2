@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useSession } from "../contexts/SessionContext";
 import { useSettings } from "../hooks/useSettings";
-import { useRealWebSocket } from "../contexts/RealWebSocketContext.fixed";
+import { useWebSocket } from "../contexts/SimpleWebSocketContext";
 import { WebSocketMessage, WebSocketMessageType, MessageTypes } from "../contexts/WebSocketContextBridge";
 import styles from "../styles/Transcription.module.css";
 
@@ -12,7 +12,7 @@ interface TranscriptionProps {
 const Transcription: React.FC<TranscriptionProps> = ({ onNewTranscription }) => {
   const { currentSession } = useSession();
   const { settings } = useSettings();
-  const { status: socketStatus, sendMessage, lastMessage, addMessageHandler } = useRealWebSocket();
+  const { status: socketStatus, sendMessage, lastMessage, addMessageHandler } = useWebSocket();
   const [isRecording, setIsRecording] = useState(false);
   const [transcription, setTranscription] = useState<string>("");
   const [connected, setConnected] = useState(socketStatus === 'open');

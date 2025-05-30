@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Draggable from 'react-draggable';
 import { useSession } from '../../contexts/SessionContext';
-import { useAudio } from '../../contexts/AudioContext';
+import { useAudio } from '../../contexts/SimpleAudioContext';
 import { isElectron, createMiniTab } from '../../utils/electronBridge';
 
 // Import panel components - only include the core features
@@ -29,6 +29,7 @@ const MiniTab = (): React.ReactElement => {
   const [elapsedTime, setElapsedTime] = useState(0);
   const [activeTab, setActiveTab] = useState<'summary' | 'chat'>('summary');
   const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isHovering, setIsHovering] = useState(false);
   const [isExpandedByHover, setIsExpandedByHover] = useState(false);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isNearEdge, setIsNearEdge] = useState(false);
@@ -112,6 +113,33 @@ const MiniTab = (): React.ReactElement => {
     }
   };
 
+  // Handle mouse enter for hover effects
+  const handleMouseEnter = useCallback(() => {
+    setIsHovering(true);
+    if (isCollapsed) {
+      // Clear any existing timeout
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+      // Set timeout to expand the tab after a short delay
+      hoverTimeoutRef.current = setTimeout(() => {
+        setIsExpandedByHover(true);
+      }, 300); // 300ms delay before expanding
+    }
+  }, [isCollapsed]);
+
+  // Handle mouse leave for hover effects
+  const handleMouseLeave = useCallback(() => {
+    setIsHovering(false);
+    // Clear any existing timeout
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    // Collapse the tab after leaving
+    setIsExpandedByHover(false);
+  }, []);
+  
   // Check if component is near window edge for snap behavior
   const checkEdgeProximity = useCallback((x: number, y: number) => {
     if (!containerRef.current) return false;
@@ -160,8 +188,16 @@ const MiniTab = (): React.ReactElement => {
     >
       <motion.div
         ref={containerRef}
-        className={`absolute top-0 left-0 flex flex-col bg-white dark:bg-dark-800 shadow-lg rounded-lg overflow-hidden ${isNearEdge ? 'border-2 border-primary-300 dark:border-primary-700' : 'border border-gray-200 dark:border-dark-700'}`}
-        style={{ width: 320, zIndex: 1000 }}
+        className={`fixed z-30 ${isCollapsed ? 'w-16' : 'w-80'} ${isNearEdge ? 'right-0' : ''} shadow-xl bg-white dark:bg-dark-800 rounded-lg overflow-hidden transition-all duration-300 ease-in-out`}
+        style={{
+          height: isCollapsed ? '40px' : '400px',
+          top: '5rem',
+          right: isNearEdge ? '0' : position.x,
+          bottom: 'auto',
+          opacity: isVisible ? 1 : 0,
+          pointerEvents: isVisible ? 'auto' : 'none',
+        }}
+        onMouseEnter={handleMouseEnter}
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{
           opacity: isVisible ? 1 : 0,
@@ -169,22 +205,7 @@ const MiniTab = (): React.ReactElement => {
           height: isCollapsed ? 40 : 'auto',
         }}
         transition={{ duration: 0.2 }}
-        onMouseEnter={() => {
-          if (isCollapsed) {
-            hoverTimeoutRef.current = setTimeout(() => {
-              setIsExpandedByHover(true);
-            }, 500) as unknown as NodeJS.Timeout;
-          }
-        }}
-        onMouseLeave={() => {
-          if (hoverTimeoutRef.current) {
-            clearTimeout(hoverTimeoutRef.current);
-            hoverTimeoutRef.current = null;
-          }
-          if (isExpandedByHover) {
-            setIsExpandedByHover(false);
-          }
-        }}
+        onMouseLeave={handleMouseLeave}
       >
         {/* Header */}
         <div ref={dragNodeRef} className="drag-handle p-2 flex justify-between items-center bg-gray-50 dark:bg-dark-700 border-b border-gray-200 dark:border-dark-600 cursor-move">

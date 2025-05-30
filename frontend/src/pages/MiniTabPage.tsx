@@ -1,7 +1,7 @@
 import React from 'react';
 import ElectronMiniTab from '../components/floating/ElectronMiniTab';
 import { SessionProvider } from '../contexts/SessionContext';
-import { AudioProvider } from '../contexts/AudioContext';
+import { AudioProvider } from '../contexts/SimpleAudioContext';
 import WebSocketWrapper from '../contexts/WebSocketWrapper';
 
 const MiniTabPage: React.FC = () => {

@@ -19,13 +19,14 @@ import StatusPanelPage from './pages/StatusPanelPage';
 import EnhancedMiniTabPage from './pages/EnhancedMiniTabPage';
 
 // Import floating components
-import MiniTab from './components/floating/MiniTab';
+import ImprovedMiniTab from './components/floating/ImprovedMiniTab';
 import StatusPanel from './components/floating/StatusPanel';
+import EnhancedMiniTab from './components/floating/EnhancedMiniTab';
 
 // Import contexts
-import { AudioProvider } from './contexts/AudioContext';
+import { AudioProvider } from './contexts/SimpleAudioContext';
 import { SessionProvider } from './contexts/SessionContext';
-import WebSocketWrapper from './contexts/WebSocketWrapper';
+import { DirectWebSocketProvider } from './contexts/DirectWebSocketContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import SystemHealthMonitor from './components/SystemHealthMonitor';
@@ -101,7 +102,7 @@ function App() {
   return (
     <ErrorBoundary>
       <SettingsProvider>
-        <WebSocketWrapper>
+        <DirectWebSocketProvider>
           <AudioProvider>
             <SessionProvider>
             {/* Check if we're in a floating window route or main app */}
@@ -115,8 +116,9 @@ function App() {
               <Route path="*" element={
                 <>
                   {/* Floating components for browser or in-app mode */}
-                  {!isElectron() || showMiniTab ? <MiniTab /> : null}
+                  {!isElectron() || showMiniTab ? <ImprovedMiniTab /> : null}
                   {!isElectron() || showStatusPanel ? <StatusPanel /> : null}
+                  {!isElectron() || showEnhancedMiniTab ? <EnhancedMiniTab /> : null}
                 </>
               } />
               
@@ -139,7 +141,7 @@ function App() {
             <SystemHealthMonitor />
           </SessionProvider>
         </AudioProvider>
-      </WebSocketWrapper>
+      </DirectWebSocketProvider>
     </SettingsProvider>
     </ErrorBoundary>
   );

@@ -19,6 +19,9 @@ from typing import Dict, List, Optional, Any, Callable, Set
 
 import aiohttp
 
+# Import database repositories
+from app.database import transcription_repository, speaker_repository
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -155,56 +158,81 @@ class DeepgramTranscriptionService:
             # Check if this is a transcription result
             if "channel" in data and "alternatives" in data["channel"]:
                 alternatives = data["channel"]["alternatives"]
-                if alternatives and "transcript" in alternatives[0]:
-                    transcript = alternatives[0]["transcript"]
+                
+                # Process each alternative transcription
+                for alternative in alternatives:
+                    transcript = alternative.get("transcript", "")
                     is_final = data.get("is_final", False)
+                    confidence = alternative.get("confidence", 0.0)
                     
-                    # Only process if there's actual content
-                    if transcript.strip():
-                        # Extract speaker information if available
-                        speaker = None
-                        if "speaker" in alternatives[0]:
-                            speaker = alternatives[0]["speaker"]
+                    # Extract speaker information if available
+                    speaker_id = None
+                    start_time = None
+                    end_time = None
+                    word_count = 0
+                    
+                    if "words" in alternative and len(alternative["words"]) > 0:
+                        words = alternative["words"]
+                        word_count = len(words)
+                        # Use the speaker from the first word (should be consistent in a single utterance)
+                        if "speaker" in words[0]:
+                            speaker_id = str(words[0]["speaker"])
                         
-                        # Create update data
-                        update = {
-                            "session_id": session_id,
-                            "text": transcript,
-                            "is_final": is_final,
-                            "language": session["language"],
-                        }
-                        
-                        # Add speaker info if available
-                        if speaker is not None:
-                            update["speaker"] = f"Speaker {speaker}"
+                        # Extract timing information if available
+                        if "start" in words[0] and "end" in words[-1]:
+                            start_time = words[0]["start"]
+                            end_time = words[-1]["end"]
+                    
+                    # Create transcription result object
+                    result = {
+                        "text": transcript,
+                        "is_final": is_final,
+                        "session_id": session_id,
+                        "timestamp": time.time(),
+                        "speaker_id": speaker_id,
+                        "speaker_name": f"Speaker {speaker_id}" if speaker_id else None,
+                        "confidence": confidence,
+                        "start_time": start_time,
+                        "end_time": end_time
+                    }
+                    
+                    # Save to database if it's a final transcription
+                    if is_final and transcript.strip():
+                        try:
+                            # Save transcription
+                            transcription_repository.save_transcription(
+                                session_id=session_id,
+                                text=transcript,
+                                is_final=is_final,
+                                speaker_id=speaker_id,
+                                speaker_name=result["speaker_name"],
+                                confidence=confidence,
+                                start_time=start_time,
+                                end_time=end_time
+                            )
                             
-                            # Update speaker statistics if this is a final result
-                            if is_final:
-                                if speaker not in session["speakers"]:
-                                    session["speakers"][speaker] = {
-                                        "id": speaker,
-                                        "label": f"Speaker {speaker}",
-                                        "word_count": 0,
-                                        "talk_time": 0
-                                    }
-                                
-                                # Update word count (approximate)
-                                words = len(transcript.split())
-                                session["speakers"][speaker]["word_count"] += words
-                                
-                                # Approximate talk time (average 2 words per second)
-                                session["speakers"][speaker]["talk_time"] += words / 2
-                        
-                        # If this is a final result, append to the final transcript
-                        if is_final:
-                            if session["final_transcript"]:
-                                session["final_transcript"] += " " + transcript
-                            else:
-                                session["final_transcript"] = transcript
-                        
-                        # Store chunk and trigger callbacks
-                        session["chunks"].append(update)
-                        await self.callback_manager.trigger_callbacks(session_id, update)
+                            # Update speaker statistics if available
+                            if speaker_id:
+                                talk_time = (end_time - start_time) if (end_time and start_time) else 0
+                                speaker_repository.save_speaker(
+                                    session_id=session_id,
+                                    speaker_id=speaker_id,
+                                    name=result["speaker_name"],
+                                    word_count=word_count,
+                                    talk_time=talk_time
+                                )
+                        except Exception as e:
+                            logger.error(f"Error saving transcription to database: {e}")
+                    
+                    # Trigger callbacks with the result
+                    await self.callback_manager.trigger_callbacks(session_id, result)
+                    
+                    # If this is a final result, append to the final transcript
+                    if is_final and transcript.strip():
+                        if session["final_transcript"]:
+                            session["final_transcript"] += " " + transcript
+                        else:
+                            session["final_transcript"] = transcript
         
         except json.JSONDecodeError:
             logger.error(f"Failed to decode Deepgram message: {message}")

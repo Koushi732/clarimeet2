@@ -83,79 +83,12 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const { settings } = useSettingsContext();
   const webSocketContext = useWebSocketBridge();
 
-  // Clean up audio processing resources
-  const cleanupAudioProcessing = React.useCallback(() => {
-    console.log('Cleaning up audio processing resources...');
-    
-    // Stop any active audio stream
-    if (mediaStreamRef.current) {
-      const tracks = mediaStreamRef.current.getTracks();
-      tracks.forEach(track => {
-        console.log(`Stopping audio track: ${track.kind}/${track.label}`);
-        track.stop();
-      });
-      mediaStreamRef.current = null;
-    }
-    
-    // Disconnect the audio processing graph
-    if (sourceNodeRef.current) {
-      try {
-        sourceNodeRef.current.disconnect();
-        console.log('Disconnected source node');
-      } catch (err) {
-        console.warn('Error disconnecting source node:', err);
-      }
-      sourceNodeRef.current = null;
-    }
-    
-    if (analyserRef.current) {
-      try {
-        analyserRef.current.disconnect();
-        console.log('Disconnected analyser node');
-      } catch (err) {
-        console.warn('Error disconnecting analyser node:', err);
-      }
-      analyserRef.current = null;
-    }
-    
-    if (processorNodeRef.current) {
-      try {
-        processorNodeRef.current.disconnect();
-        console.log('Disconnected processor node');
-      } catch (err) {
-        console.warn('Error disconnecting processor node:', err);
-      }
-      processorNodeRef.current.onaudioprocess = null;
-      processorNodeRef.current = null;
-    }
-    
-    // Close audio context
-    if (audioContextRef.current) {
-      if (audioContextRef.current.state !== 'closed') {
-        try {
-          audioContextRef.current.close();
-          console.log('Closed audio context');
-        } catch (err) {
-          console.warn('Error closing audio context:', err);
-        }
-      }
-      audioContextRef.current = null;
-    }
-    
-    // Clear other references
-    audioBufferRef.current = null;
-    audioChunksRef.current = [];
-    webSocketStreamingRef.current = false;
-    
-    console.log('Audio processing resources cleaned up');
-  }, []);
-
   // Load devices on component mount
   React.useEffect(() => {
     refreshDevices();
     // Clean up any audio resources when component unmounts
     return () => cleanupAudioProcessing();
-  }, [cleanupAudioProcessing]);
+  }, []);
 
   // Simulate audio level when recording
   React.useEffect(() => {
@@ -265,6 +198,73 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.error('Error processing audio:', err);
     }
   }, [webSocketContext, recordingStatus.sessionId]);
+
+  // Clean up audio processing resources
+  const cleanupAudioProcessing = React.useCallback(() => {
+    console.log('Cleaning up audio processing resources...');
+    
+    // Stop any active audio stream
+    if (mediaStreamRef.current) {
+      const tracks = mediaStreamRef.current.getTracks();
+      tracks.forEach(track => {
+        console.log(`Stopping audio track: ${track.kind}/${track.label}`);
+        track.stop();
+      });
+      mediaStreamRef.current = null;
+    }
+    
+    // Disconnect the audio processing graph
+    if (sourceNodeRef.current) {
+      try {
+        sourceNodeRef.current.disconnect();
+        console.log('Disconnected source node');
+      } catch (err) {
+        console.warn('Error disconnecting source node:', err);
+      }
+      sourceNodeRef.current = null;
+    }
+    
+    if (analyserRef.current) {
+      try {
+        analyserRef.current.disconnect();
+        console.log('Disconnected analyser node');
+      } catch (err) {
+        console.warn('Error disconnecting analyser node:', err);
+      }
+      analyserRef.current = null;
+    }
+    
+    if (processorNodeRef.current) {
+      try {
+        processorNodeRef.current.disconnect();
+        console.log('Disconnected processor node');
+      } catch (err) {
+        console.warn('Error disconnecting processor node:', err);
+      }
+      processorNodeRef.current.onaudioprocess = null;
+      processorNodeRef.current = null;
+    }
+    
+    // Close audio context
+    if (audioContextRef.current) {
+      if (audioContextRef.current.state !== 'closed') {
+        try {
+          audioContextRef.current.close();
+          console.log('Closed audio context');
+        } catch (err) {
+          console.warn('Error closing audio context:', err);
+        }
+      }
+      audioContextRef.current = null;
+    }
+    
+    // Clear other references
+    audioBufferRef.current = null;
+    audioChunksRef.current = [];
+    webSocketStreamingRef.current = false;
+    
+    console.log('Audio processing resources cleaned up');
+  }, []);
 
   // Get current audio level
   const getAudioLevel = React.useCallback(() => {
@@ -431,41 +431,31 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       
       // Connect audio graph
-      const source = audioCtx.createMediaStreamSource(stream);
-      sourceNodeRef.current = source;
+      const sourceNode = audioCtx.createMediaStreamSource(stream);
+      sourceNodeRef.current = sourceNode;
       
-      // Create script processor for raw audio data - use a smaller buffer size for more frequent updates
-      const processor = audioCtx.createScriptProcessor(2048, 1, 1);
-      processorNodeRef.current = processor;
+      // Use ScriptProcessor for now (deprecated but still widely supported)
+      // In future versions we can migrate to AudioWorklet when better supported
+      const processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
+      processorNodeRef.current = processorNode;
       
-      console.log('Created audio processor with buffer size:', processor.bufferSize);
+      // Connect the audio processing pipeline
+      sourceNode.connect(analyser);
+      analyser.connect(processorNode);
+      processorNode.connect(audioCtx.destination);
       
-      // Connect the audio graph
-      source.connect(analyser);
-      analyser.connect(processor);
-      processor.connect(audioCtx.destination);
+      // Set up the audio processing callback
+      processorNode.onaudioprocess = onaudioprocess;
       
-      // Log success of audio pipeline setup
-      console.log('Audio processing pipeline successfully connected');
-      
-      // Initialize WebSocket streaming
+      // Start streaming
       webSocketStreamingRef.current = true;
       
-      // Set up processing callback
-      processor.onaudioprocess = onaudioprocess;
-      
-      console.log('Audio processing initialized with sample rate:', audioCtx.sampleRate);
-      
-      // Connect to session via WebSocket
-      console.log('Connecting to session via WebSocket...');
-      webSocketContext.connectToSession(sessionId);
-      
-      // Send initial recording start message
-      const messageSent = webSocketContext.sendMessage({
+      // Tell backend that recording has started
+      webSocketContext.sendMessage({
         type: 'recording_start' as WebSocketMessageType,
         data: {
-          sessionId: sessionId,
-          title: title,
+          sessionId,
+          title: title || 'Untitled Recording',
           description: description || '',
           timestamp: new Date().toISOString(),
           sampleRate: audioCtx.sampleRate,
@@ -474,8 +464,6 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           deviceName: selectedDevice.name
         }
       });
-      
-      console.log('Recording start message sent:', messageSent);
       
       // Update recording status
       setRecordingStatus({

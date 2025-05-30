@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChartBarIcon, XMarkIcon, DocumentTextIcon } from '@heroicons/react/24/solid';
 import { useSession } from '../../contexts/SessionContext';
-import { useAudio } from '../../contexts/AudioContext';
+import { useAudio } from '../../contexts/SimpleAudioContext';
 import { useWebSocketBridge, WebSocketMessageType, MessageTypes } from '../../contexts/WebSocketContextBridge';
 
 /**

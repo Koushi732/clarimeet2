@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useWebSocketBridge, WebSocketMessageType } from '../contexts/WebSocketContextBridge';
-import { useAudio } from '../contexts/AudioContext';
+import { useAudio } from '../contexts/SimpleAudioContext';
 import { useSession } from '../contexts/SessionContext';
 import { ExclamationCircleIcon, CheckCircleIcon, ArrowPathIcon } from '@heroicons/react/24/solid';
 

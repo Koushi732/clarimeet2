@@ -578,7 +578,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       
       // Tell backend to stop transcription
       try {
-        await axios.post(`${settings.apiBaseUrl}/api/transcription/${sessionId}/stop`);
+        await axios.post(`/api/transcription/${sessionId}/stop`);
         console.log('Successfully stopped transcription on backend');
       } catch (apiError) {
         console.error('Error stopping transcription on backend:', apiError);

@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MockWebSocketProvider } from './MockWebSocketContext';
-import { RealWebSocketProvider } from './RealWebSocketContext.fixed';
+import { WebSocketProvider } from './SimpleWebSocketContext';
 import { useSettings } from '../hooks/useSettings';
-import { io } from 'socket.io-client';
 
 interface WebSocketWrapperProps {
   children: React.ReactNode;
@@ -80,7 +79,7 @@ export const WebSocketWrapper: React.FC<WebSocketWrapperProps> = ({ children, se
     </div>
   ) : (
     <div id="real-websocket-provider" style={{ display: 'contents' }}>
-      <RealWebSocketProvider sessionId={sessionId}>{children}</RealWebSocketProvider>
+      <WebSocketProvider sessionId={sessionId}>{children}</WebSocketProvider>
     </div>
   );
 };

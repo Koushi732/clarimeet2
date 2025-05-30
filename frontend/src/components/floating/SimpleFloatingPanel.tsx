@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { XMarkIcon, ArrowsPointingOutIcon, ArrowsPointingInIcon, Cog6ToothIcon, MicrophoneIcon, DocumentTextIcon, PaperAirplaneIcon, UserIcon, ChartBarIcon, ChatBubbleLeftRightIcon } from '@heroicons/react/24/solid';
 import { useWebSocketBridge, WebSocketMessageType, MessageTypes } from '../../contexts/WebSocketContextBridge';
 import { useSession } from '../../contexts/SessionContext';
-import { useAudio } from '../../contexts/AudioContext';
+import { useAudio } from '../../contexts/SimpleAudioContext';
 
 /**
  * A simple, reliable floating panel that works without complex WebSocket handling

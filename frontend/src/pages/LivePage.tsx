@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { useAudio } from '../contexts/AudioContext';
+import { useAudio } from '../contexts/SimpleAudioContext';
 import { useSession } from '../contexts/SessionContext';
 import { useSettingsContext } from '../contexts/SettingsContext';
 import { useWebSocketBridge, WebSocketMessageType, WebSocketMessage } from '../contexts/WebSocketContextBridge';

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { useAudio } from '../contexts/AudioContext';
+import { useAudio } from '../contexts/SimpleAudioContext';
 import { useSession } from '../contexts/SessionContext';
 import { useSettingsContext } from '../contexts/SettingsContext';
 import AudioVisualizer from '../components/ui/AudioVisualizer';

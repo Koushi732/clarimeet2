@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import LanguageSelector from '../language/LanguageSelector';
+import { DatabaseService } from '../../services/DatabaseService';
 
 interface TranscriptionSettingsProps {
   onSettingsChange: (settings: TranscriptionSettings) => void;
   initialSettings?: Partial<TranscriptionSettings>;
   className?: string;
+  userId?: string; // Added for database integration
+  sessionId?: string; // Optional session ID for session-specific settings
 }
 
 export interface TranscriptionSettings {
@@ -33,17 +36,102 @@ const TranscriptionSettings: React.FC<TranscriptionSettingsProps> = ({
   onSettingsChange,
   initialSettings = {},
   className = '',
+  userId = 'default-user',
+  sessionId
 }) => {
-  // Merge default settings with any initial settings provided
   const [settings, setSettings] = useState<TranscriptionSettings>({
     ...DEFAULT_SETTINGS,
     ...initialSettings,
   });
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Notify parent when settings change
+  // Load settings from database
+  const loadSettings = useCallback(async () => {
+    if (!userId && !sessionId) return;
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      let loadedSettings: Partial<TranscriptionSettings> = {};
+      let foundSettings = false;
+      
+      // If sessionId is provided, try to get session-specific settings first
+      if (sessionId) {
+        const sessionSettings = await DatabaseService.getSessionSettings(sessionId);
+        if (sessionSettings && Object.keys(sessionSettings).length > 0) {
+          loadedSettings = sessionSettings;
+          foundSettings = true;
+          console.log('Loaded transcription settings from session:', sessionId);
+        }
+      }
+      
+      // If no session settings found, try user settings
+      if (!foundSettings && userId) {
+        const userSettings = await DatabaseService.getUserSettings(userId);
+        if (userSettings && Object.keys(userSettings).length > 0) {
+          loadedSettings = userSettings;
+          foundSettings = true;
+          console.log('Loaded transcription settings from user:', userId);
+          
+          // If we have session ID, migrate settings to session for future use
+          if (sessionId) {
+            await DatabaseService.saveSessionSettings(sessionId, loadedSettings);
+            console.log('Migrated user settings to session settings');
+          }
+        }
+      }
+      
+      // If settings were found, update state
+      if (foundSettings) {
+        // Merge loaded settings with defaults and initial settings
+        setSettings(prevSettings => ({
+          ...DEFAULT_SETTINGS,
+          ...initialSettings,
+          ...loadedSettings,
+        }));
+      }
+    } catch (err) {
+      console.error('Error loading settings from database:', err);
+      setError('Failed to load settings');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [userId, sessionId, initialSettings]);
+
+  // Save settings to database when they change
+  const saveSettings = useCallback(async (settingsToSave: TranscriptionSettings) => {
+    if (!userId && !sessionId) return;
+    
+    try {
+      // Always prioritize saving to session settings if we have a session ID
+      if (sessionId) {
+        await DatabaseService.saveSessionSettings(sessionId, settingsToSave);
+        console.log('Saved transcription settings to session:', sessionId);
+      }
+      
+      // Also save to user settings for backup and reuse across sessions
+      if (userId) {
+        await DatabaseService.saveUserSettings(userId, settingsToSave);
+        console.log('Saved transcription settings to user profile');
+      }
+    } catch (err) {
+      console.error('Error saving settings to database:', err);
+      setError('Failed to save settings');
+    }
+  }, [userId, sessionId]);
+
+  // Load settings on component mount
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  // Notify parent when settings change and save to database
   useEffect(() => {
     onSettingsChange(settings);
-  }, [settings, onSettingsChange]);
+    saveSettings(settings);
+  }, [settings, onSettingsChange, saveSettings]);
 
   // Update a single setting and maintain the rest
   const updateSetting = <K extends keyof TranscriptionSettings>(

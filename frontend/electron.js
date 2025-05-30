@@ -59,19 +59,19 @@ function createMainWindow() {
 // App is ready event handler
 function createTray() {
   try {
-    let iconPath = path.join(__dirname, 'public', 'favicon.ico');
+    // Use a built-in Electron standard icon to avoid icon loading issues
+    // This ensures we have a reliable tray icon on all platforms
+    let iconPath;
     
-    // Fallback to default icon if file doesn't exist
-    if (!fs.existsSync(iconPath)) {
-      console.warn('Favicon not found at path:', iconPath);
-      // Use a simple empty tray icon as fallback
-      iconPath = path.join(__dirname, 'public', 'favicon.svg');
-      if (!fs.existsSync(iconPath)) {
-        // If SVG doesn't exist either, use a system icon
-        if (process.platform === 'win32') {
-          iconPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'shell32.dll');
-        }
-      }
+    if (process.platform === 'win32') {
+      // On Windows, use a built-in system icon from shell32.dll
+      iconPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'shell32.dll');
+    } else if (process.platform === 'darwin') {
+      // On macOS, use a template image (works better for dark/light mode)
+      iconPath = path.join(__dirname, 'public', 'microphone.png');
+    } else {
+      // On Linux, try the favicon.ico
+      iconPath = path.join(__dirname, 'public', 'favicon.ico');
     }
     
     tray = new Tray(iconPath);

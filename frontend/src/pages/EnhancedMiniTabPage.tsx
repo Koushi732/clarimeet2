@@ -1,7 +1,7 @@
 import React from 'react';
 import EnhancedMiniTab from '../components/floating/EnhancedMiniTab';
 import { SessionProvider } from '../contexts/SessionContext';
-import { AudioProvider } from '../contexts/AudioContext';
+import { AudioProvider } from '../contexts/SimpleAudioContext';
 import WebSocketWrapper from '../contexts/WebSocketWrapper';
 
 const EnhancedMiniTabPage: React.FC = () => {

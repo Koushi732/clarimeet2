@@ -42,6 +42,12 @@ try:
 except ImportError:
     logger.warning("Could not import websocket_router, using mock implementation")
     websocket_router = None
+
+try:
+    from app.routers.direct_websocket import router as direct_websocket_router
+except ImportError:
+    logger.warning("Could not import direct_websocket_router, using mock implementation")
+    direct_websocket_router = None
     
 try:
     from app.routers.health import router as health_router
@@ -68,25 +74,11 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Add CORS middleware with explicit settings for Socket.IO support
-origins = [
-    "http://localhost",
-    "http://localhost:3000",
-    "http://127.0.0.1",
-    "http://127.0.0.1:3000",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "*",  # For development only, remove in production
-]
+# Import our custom CORS utilities
+from app.utils.cors import setup_cors
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
+# Set up CORS with our custom utility that adds headers to all responses
+setup_cors(app)
 
 # Include available routers
 # Always include the mock devices router for prototype demo
@@ -99,6 +91,9 @@ if session_router:
     app.include_router(session_router)
 if websocket_router:
     app.include_router(websocket_router)
+if direct_websocket_router:
+    app.include_router(direct_websocket_router)
+    logger.info("Registered direct WebSocket router")
 if health_router:
     app.include_router(health_router)
 
@@ -117,7 +112,19 @@ async def connect(sid, environ):
     """
     Handle new Socket.IO connections.
     """
-    client_id = str(uuid.uuid4())
+    # Check if client_id was provided in query parameters
+    query = environ.get('QUERY_STRING', '')
+    query_params = {}
+    
+    # Parse query parameters
+    for param in query.split('&'):
+        if '=' in param:
+            key, value = param.split('=', 1)
+            query_params[key] = value
+    
+    # Use provided client_id or generate a new one
+    client_id = query_params.get('clientId', str(uuid.uuid4()))
+    
     logger.info(f"Socket.IO connection established: {sid}, client_id: {client_id}")
     # Store client_id for this session
     socketio_manager.set_client_id(sid, client_id)
@@ -127,6 +134,17 @@ async def connect(sid, environ):
         "client_id": client_id,
         "message": "Connected to Clarimeet API"
     }, room=sid)
+
+@sio.event
+async def ping(sid):
+    """
+    Handle ping messages from clients to keep the connection alive.
+    """
+    try:
+        # Simply respond with a pong message
+        await sio.emit('pong', {'timestamp': time.time()}, room=sid)
+    except Exception as e:
+        logger.error(f"Error handling ping: {e}")
 
 @sio.event
 async def disconnect(sid):
@@ -298,9 +316,34 @@ async def audio_chunk(sid, data):
 async def root():
     return {"message": "Welcome to Clariimeet API"}
 
-        
+# Import and register the SQLite database routers
+try:
+    from app.routers.sqlite_session_router import router as sqlite_session_router
+    app.include_router(sqlite_session_router)
+    logger.info("Registered SQLite session router")
+except ImportError as e:
+    logger.warning(f"Could not import SQLite session router: {e}")
 
+try:
+    from app.routers.speaker_router import router as speaker_router
+    app.include_router(speaker_router)
+    logger.info("Registered speaker router")
+except ImportError as e:
+    logger.warning(f"Could not import speaker router: {e}")
 
+try:
+    from app.routers.language_router import router as language_router
+    app.include_router(language_router)
+    logger.info("Registered language router")
+except ImportError as e:
+    logger.warning(f"Could not import language router: {e}")
+
+try:
+    from app.routers.settings_router import router as settings_router
+    app.include_router(settings_router)
+    logger.info("Registered settings router")
+except ImportError as e:
+    logger.warning(f"Could not import settings router: {e}")
 
 # Health check endpoint is now provided by health_router
 

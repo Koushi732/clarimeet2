@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Draggable from 'react-draggable';
 import { useSession } from '../../contexts/SessionContext';
-import { useAudio } from '../../contexts/AudioContext';
+import { useAudio } from '../../contexts/SimpleAudioContext';
 import { updateMiniTabPosition } from '../../utils/electronBridge';
+import { DatabaseService } from '../../services/DatabaseService';
 
 // Import panel components
 import { LiveSummaryPanel, AIChatbotPanel, LiveTranscriptionPanel } from './panels';
@@ -47,6 +48,104 @@ const EnhancedMiniTab: React.FC<EnhancedMiniTabProps> = ({
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const startPosRef = useRef({ x: 0, y: 0 });
+  const savePositionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const userId = 'default-user'; // In a real app, this would come from auth context
+  
+  // Load saved position and UI state from database or localStorage
+  const loadSavedState = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      // Try to load from database first
+      if (userId) {
+        const userSettings = await DatabaseService.getUserSettings(userId);
+        if (userSettings) {
+          // Load position if available
+          if (userSettings.enhancedMiniTabPosition) {
+            setPosition(userSettings.enhancedMiniTabPosition);
+          }
+          
+          // Load UI state if available
+          if (userSettings.enhancedMiniTabState) {
+            const { panel, collapsed, expanded } = userSettings.enhancedMiniTabState;
+            if (panel) setActivePanel(panel as MiniTabPanel);
+            if (typeof collapsed === 'boolean') setIsCollapsed(collapsed);
+            if (typeof expanded === 'boolean') setIsExpanded(expanded);
+          }
+        }
+      }
+      
+      // Fallback to localStorage
+      const savedState = localStorage.getItem('clarimeet_enhanced_minitab_state');
+      if (savedState) {
+        try {
+          const state = JSON.parse(savedState);
+          if (state.position) setPosition(state.position);
+          if (state.panel) setActivePanel(state.panel);
+          if (typeof state.collapsed === 'boolean') setIsCollapsed(state.collapsed);
+          if (typeof state.expanded === 'boolean') setIsExpanded(state.expanded);
+        } catch (e) {
+          console.error('Failed to parse saved state:', e);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading saved state:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [userId]);
+
+  // Save position and UI state to database with debounce
+  const saveState = useCallback(async () => {
+    // Clear any existing timeout to prevent multiple rapid saves
+    if (savePositionTimeoutRef.current) {
+      clearTimeout(savePositionTimeoutRef.current);
+    }
+    
+    // Set new timeout to save state after a delay (debounce)
+    savePositionTimeoutRef.current = setTimeout(async () => {
+      try {
+        const state = {
+          position,
+          panel: activePanel,
+          collapsed: isCollapsed,
+          expanded: isExpanded
+        };
+        
+        // Save to database
+        if (userId) {
+          // Get current settings first
+          const userSettings = await DatabaseService.getUserSettings(userId) || {};
+          
+          // Update with new state
+          await DatabaseService.saveUserSettings(userId, {
+            ...userSettings,
+            enhancedMiniTabPosition: position,
+            enhancedMiniTabState: {
+              panel: activePanel,
+              collapsed: isCollapsed,
+              expanded: isExpanded
+            }
+          });
+        }
+        
+        // Backup to localStorage
+        localStorage.setItem('clarimeet_enhanced_minitab_state', JSON.stringify(state));
+      } catch (error) {
+        console.error('Error saving state:', error);
+      }
+    }, 500); // 500ms debounce
+  }, [userId, position, activePanel, isCollapsed, isExpanded]);
+
+  // Load saved state on component mount
+  useEffect(() => {
+    loadSavedState();
+  }, [loadSavedState]);
+  
+  // Save state whenever relevant values change
+  useEffect(() => {
+    saveState();
+  }, [position, activePanel, isCollapsed, isExpanded, saveState]);
   
   // Update elapsed time during recording
   useEffect(() => {
@@ -92,7 +191,8 @@ const EnhancedMiniTab: React.FC<EnhancedMiniTabProps> = ({
     const newX = e.clientX - startPosRef.current.x;
     const newY = e.clientY - startPosRef.current.y;
     
-    setPosition({ x: newX, y: newY });
+    const newPosition = { x: newX, y: newY };
+    setPosition(newPosition);
     
     // Update position in Electron main process
     if (containerRef.current) {
@@ -104,6 +204,9 @@ const EnhancedMiniTab: React.FC<EnhancedMiniTabProps> = ({
         height: rect.height
       });
     }
+    
+    // The position will be saved to the database via the saveState effect
+    // since it's triggered by changes to the position state
   };
   
   const handleMouseUp = () => {

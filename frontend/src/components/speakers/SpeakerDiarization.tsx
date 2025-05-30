@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import SpeakerBadge, { Speaker } from './SpeakerBadge';
+import { DatabaseService } from '../../services/DatabaseService';
+import { useSession } from '../../contexts/SessionContext';
 
 export interface TranscriptSegment {
   id: string;
@@ -13,6 +15,7 @@ export interface TranscriptSegment {
 
 interface SpeakerDiarizationProps {
   transcripts: TranscriptSegment[];
+  sessionId?: string;
   onSpeakerAssign?: (segmentId: string, speakerId: string) => void;
 }
 
@@ -21,19 +24,64 @@ interface SpeakerDiarizationProps {
  */
 const SpeakerDiarization: React.FC<SpeakerDiarizationProps> = ({
   transcripts,
+  sessionId,
   onSpeakerAssign
 }) => {
+  const { currentSession } = useSession();
+  const activeSessionId = sessionId || currentSession?.session?.id;
+  
   // Default speakers
   const [speakers, setSpeakers] = useState<Speaker[]>([
     { id: 'speaker-1', name: 'Speaker 1' },
     { id: 'speaker-2', name: 'Speaker 2' },
-    { id: 'speaker-3', name: 'Speaker 3' },
     { id: 'unknown', name: 'Unknown' }
   ]);
   
   // Track active speaker for editing
   const [editingSpeaker, setEditingSpeaker] = useState<string | null>(null);
   const [newSpeakerName, setNewSpeakerName] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Load speakers from database
+  const loadSpeakers = useCallback(async () => {
+    if (!activeSessionId) return;
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const sessionSpeakers = await DatabaseService.getSessionSpeakers(activeSessionId);
+      
+      if (sessionSpeakers && sessionSpeakers.length > 0) {
+        // Transform to the component's Speaker format
+        const formattedSpeakers = sessionSpeakers.map(speaker => ({
+          id: speaker.id,
+          name: speaker.name
+        }));
+        
+        // Add unknown speaker if it doesn't exist
+        if (!formattedSpeakers.some(speaker => speaker.id === 'unknown')) {
+          formattedSpeakers.push({ id: 'unknown', name: 'Unknown' });
+        }
+        
+        setSpeakers(formattedSpeakers);
+      }
+    } catch (err) {
+      console.error('Error loading speakers:', err);
+      setError('Failed to load speakers from database');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [activeSessionId]);
+  
+  // Load speakers when session ID changes
+  useEffect(() => {
+    if (activeSessionId) {
+      loadSpeakers();
+    }
+  }, [activeSessionId, loadSpeakers]);
+
 
   // Add a new speaker
   const addSpeaker = () => {
@@ -56,17 +104,33 @@ const SpeakerDiarization: React.FC<SpeakerDiarizationProps> = ({
   };
 
   // Save speaker name changes
-  const saveSpeakerEdit = () => {
+  const saveSpeakerEdit = async () => {
     if (!editingSpeaker || !newSpeakerName.trim()) {
       setEditingSpeaker(null);
       return;
     }
 
+    // Update local state first for immediate UI update
     setSpeakers(speakers.map(speaker => 
       speaker.id === editingSpeaker 
         ? { ...speaker, name: newSpeakerName } 
         : speaker
     ));
+    
+    // Save to database if session ID is available
+    if (activeSessionId && editingSpeaker !== 'unknown') {
+      try {
+        await DatabaseService.updateSpeakerName(
+          activeSessionId,
+          editingSpeaker,
+          newSpeakerName
+        );
+        console.log(`Updated speaker ${editingSpeaker} name to "${newSpeakerName}" in database`);
+      } catch (err) {
+        console.error('Error saving speaker name:', err);
+        // Could show an error toast here
+      }
+    }
     
     setEditingSpeaker(null);
   };

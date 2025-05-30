@@ -486,6 +486,16 @@ async def process_audio_file(session_id: str, audio_path: str, model: str = "whi
             except Exception as sum_error:
                 logger.error(f"Error generating summary: {sum_error}")
         
+        # Update status
+        transcription_status[session_id]["status"] = "completed"
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error processing audio file: {e}")
+        if session_id in transcription_status:
+            transcription_status[session_id]["status"] = "error"
+            transcription_status[session_id]["error"] = str(e)
+        return False
 
 async def start_transcription(session_id: str, audio_path: str, model: str = "whisper-small", language: str = "en") -> bool:
     """Start real-time transcription for a session."""

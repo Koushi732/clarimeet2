@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { DatabaseService, Language as DbLanguage } from '../../services/DatabaseService';
 
 export interface Language {
   code: string;
@@ -13,74 +14,197 @@ interface LanguageSelectorProps {
   onLanguageChange: (languageCode: string) => void;
   size?: 'small' | 'medium' | 'large';
   showNativeNames?: boolean;
+  userId?: string; // User ID for user-specific recent languages
+  sessionId?: string; // Session ID for session-specific recent languages
 }
 
 const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   selectedLanguage,
   onLanguageChange,
   size = 'medium',
-  showNativeNames = true
+  showNativeNames = true,
+  userId = 'default-user', // Default user ID if none provided
+  sessionId = undefined // Session ID for session-specific settings (optional)
 }) => {
-  // Language history stored in localStorage
+  // Language history and state
   const [recentLanguages, setRecentLanguages] = useState<string[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [languages, setLanguages] = useState<Language[]>(SUPPORTED_LANGUAGES);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Load recent languages from localStorage
-  useEffect(() => {
-    const stored = localStorage.getItem('clarimeet_recent_languages');
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          setRecentLanguages(parsed);
-        }
-      } catch (e) {
-        console.error('Failed to parse recent languages:', e);
+  // Load languages from API
+  const loadLanguages = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const apiLanguages = await DatabaseService.getAllLanguages();
+      
+      if (apiLanguages && apiLanguages.length > 0) {
+        // Convert API languages to component format
+        const formattedLanguages: Language[] = apiLanguages.map(lang => ({
+          code: lang.code,
+          name: lang.name,
+          supportLevel: lang.level,
+          // Keep native names and popular flags from our static list
+          nativeName: SUPPORTED_LANGUAGES.find(sl => sl.code === lang.code)?.nativeName,
+          popular: SUPPORTED_LANGUAGES.find(sl => sl.code === lang.code)?.popular
+        }));
+        
+        setLanguages(formattedLanguages);
       }
+    } catch (err) {
+      console.error('Error loading languages from API:', err);
+      setError('Failed to load languages from database');
+      // Fallback to static language list
+      setLanguages(SUPPORTED_LANGUAGES);
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 
+  // Load recent languages from database or localStorage
+  const loadRecentLanguages = useCallback(async () => {
+    try {
+      let foundRecentLanguages = false;
+      
+      // First try session-specific recent languages if sessionId is provided
+      if (sessionId) {
+        try {
+          const sessionSetting = await DatabaseService.getSessionSetting(sessionId, 'recentLanguages');
+          if (sessionSetting && sessionSetting.value && Array.isArray(sessionSetting.value)) {
+            setRecentLanguages(sessionSetting.value);
+            console.log('Loaded recent languages from session settings');
+            foundRecentLanguages = true;
+            return;
+          }
+        } catch (err) {
+          console.error('Error loading session recent languages:', err);
+          // Continue to fallbacks if session settings fail
+        }
+      }
+      
+      // Try to get from user settings if no session settings or not found
+      if (!foundRecentLanguages && userId) {
+        try {
+          const recentLangs = await DatabaseService.getRecentLanguages(userId);
+          if (recentLangs && recentLangs.length > 0) {
+            const langCodes = recentLangs.map(lang => lang.code);
+            setRecentLanguages(langCodes);
+            console.log('Loaded recent languages from user settings');
+            foundRecentLanguages = true;
+            
+            // If we have a sessionId, migrate user settings to session settings
+            if (sessionId) {
+              await DatabaseService.saveSessionSetting(sessionId, 'recentLanguages', langCodes);
+              console.log('Migrated recent languages to session settings');
+            }
+            
+            return;
+          }
+        } catch (err) {
+          console.error('Error loading user recent languages:', err);
+          // Continue to localStorage fallback
+        }
+      }
+      
+      // Fallback to localStorage if no database settings found
+      if (!foundRecentLanguages) {
+        const stored = localStorage.getItem('clarimeet_recent_languages');
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) {
+              setRecentLanguages(parsed);
+              console.log('Loaded recent languages from localStorage');
+              
+              // If we have sessionId, save to session settings for future use
+              if (sessionId) {
+                await DatabaseService.saveSessionSetting(sessionId, 'recentLanguages', parsed);
+                console.log('Saved localStorage recent languages to session settings');
+              }
+            }
+          } catch (e) {
+            console.error('Failed to parse recent languages from localStorage:', e);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading recent languages:', error);
+    }
+  }, [userId, sessionId]);
+
+  // Load languages and recent languages on component mount
+  useEffect(() => {
+    loadLanguages();
+    loadRecentLanguages();
+  }, [loadLanguages, loadRecentLanguages]);
+
   // Update recent languages when selection changes
-  const updateRecentLanguages = (languageCode: string) => {
+  const updateRecentLanguages = async (languageCode: string) => {
+    // Update local state first for immediate UI feedback
     const updatedRecent = [
       languageCode,
       ...recentLanguages.filter(code => code !== languageCode)
     ].slice(0, 5); // Keep only 5 most recent languages
     
     setRecentLanguages(updatedRecent);
+    
+    // First priority: Save to session settings if sessionId is provided
+    if (sessionId) {
+      try {
+        await DatabaseService.saveSessionSetting(sessionId, 'recentLanguages', updatedRecent);
+        console.log(`Saved recent languages with ${languageCode} to session ${sessionId}`);
+      } catch (error) {
+        console.error('Error saving recent languages to session settings:', error);
+      }
+    }
+    
+    // Second priority: Also save to user settings for cross-session history
+    if (userId) {
+      try {
+        await DatabaseService.addRecentLanguage(userId, languageCode);
+        console.log(`Added language ${languageCode} to recent languages for user ${userId}`);
+      } catch (error) {
+        console.error('Error updating recent languages in user settings:', error);
+      }
+    }
+    
+    // Store in localStorage as fallback
     localStorage.setItem('clarimeet_recent_languages', JSON.stringify(updatedRecent));
   };
 
   // Handle language selection
-  const handleSelectLanguage = (languageCode: string) => {
+  const handleSelectLanguage = async (languageCode: string) => {
     onLanguageChange(languageCode);
-    updateRecentLanguages(languageCode);
+    await updateRecentLanguages(languageCode);
     setIsOpen(false);
   };
 
   // Filter languages by search query
   const filteredLanguages = searchQuery
-    ? SUPPORTED_LANGUAGES.filter(
+    ? languages.filter(
         lang =>
           lang.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           lang.nativeName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
           lang.code.toLowerCase().includes(searchQuery.toLowerCase())
       )
-    : SUPPORTED_LANGUAGES;
+    : languages;
 
   // Group languages by support level and recent/popular status
-  const recentLanguageItems = SUPPORTED_LANGUAGES.filter(lang => 
+  const recentLanguageItems = languages.filter(lang => 
     recentLanguages.includes(lang.code)
   );
 
-  const popularLanguageItems = SUPPORTED_LANGUAGES.filter(lang => 
+  const popularLanguageItems = languages.filter(lang => 
     lang.popular && !recentLanguages.includes(lang.code)
   );
 
-  const selectedLanguageDetails = SUPPORTED_LANGUAGES.find(
+  const selectedLanguageDetails = languages.find(
     lang => lang.code === selectedLanguage
-  ) || SUPPORTED_LANGUAGES[0];
+  ) || languages[0];
 
   // Size classes
   const sizeClasses = {

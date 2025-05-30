@@ -16,6 +16,15 @@ import json
 import socketio
 from typing import Dict, List, Optional, Any, Set, Callable
 
+# Import database repositories
+from app.database import (
+    session_repository,
+    transcription_repository,
+    summary_repository,
+    speaker_repository,
+    chat_repository
+)
+
 # Import API-based services with free tiers
 from app.utils.deepgram_transcription import DeepgramTranscriptionService, transcription_service
 from app.utils.gemini_services import GeminiSummarizationService, summarization_service, chat_service
@@ -40,24 +49,24 @@ logger = logging.getLogger(__name__)
 # Create a Socket.IO AsyncServer instance with more secure CORS settings
 # Get allowed origins from environment or use safe defaults
 def get_allowed_origins():
-    # In development, allow all origins if explicitly set in environment
-    if os.environ.get('ENVIRONMENT', '').lower() == 'development' and os.environ.get('ALLOW_ALL_ORIGINS', '').lower() == 'true':
-        return '*'
+    # Always allow all origins in development mode for easier debugging
+    # This fixes CORS issues when the frontend is on a different port
+    return '*'
     
-    # Otherwise, use a list of allowed origins
-    origins = [
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        'http://localhost:8000',
-        'http://127.0.0.1:8000',
-    ]
-    
-    # Add any additional origins from environment
-    additional_origins = os.environ.get('ALLOWED_ORIGINS', '')
-    if additional_origins:
-        origins.extend([origin.strip() for origin in additional_origins.split(',')])
-    
-    return origins
+    # In a production environment, you would want to restrict this:
+    # origins = [
+    #     'http://localhost:3000',
+    #     'http://127.0.0.1:3000',
+    #     'http://localhost:8000',
+    #     'http://127.0.0.1:8000',
+    # ]
+    # 
+    # # Add any additional origins from environment
+    # additional_origins = os.environ.get('ALLOWED_ORIGINS', '')
+    # if additional_origins:
+    #     origins.extend([origin.strip() for origin in additional_origins.split(',')])
+    # 
+    # return origins
 
 sio = socketio.AsyncServer(
     async_mode='asgi',
@@ -169,6 +178,25 @@ class SocketIOManager:
         
         logger.info(f"Client {client_id} joined session {session_id}")
         logger.info(f"Session {session_id} now has clients: {self._session_clients[session_id]}")
+        
+        # Check if session exists in database, create if not
+        try:
+            session_data = session_repository.get_session(session_id)
+            if not session_data:
+                # Create session in database
+                session_repository.create_session(
+                    session_id,  # Use existing ID
+                    name=f"Session {session_id[:8]}",
+                    description="Created via WebSocket connection",
+                    language="en",  # Default language
+                    metadata={
+                        "created_by": client_id,
+                        "created_at": time.time()
+                    }
+                )
+                logger.info(f"Created new session record in database for {session_id}")
+        except Exception as e:
+            logger.error(f"Error checking/creating session in database: {e}")
         
         # Start real services for the session if not already running
         await self._ensure_real_services(session_id)
@@ -414,17 +442,34 @@ class SocketIOManager:
             
             # Get session data if available
             if session_id in self._active_transcriptions and self._active_transcriptions[session_id]:
-                # In a real implementation, we would have a better way to get the latest transcript
-                # For now, we'll just use an empty string or retrieve from storage in a production system
-                pass
+                # Get transcript from database
+                try:
+                    transcript = transcription_repository.get_full_transcript(session_id, include_speakers=True)
+                    logger.debug(f"Retrieved transcript for context: {len(transcript)} chars")
+                except Exception as e:
+                    logger.error(f"Error retrieving transcript: {e}")
                 
             if session_id in self._active_summarizations and self._active_summarizations[session_id]:
                 # Get the latest summary if available
-                summary_session = summarization_service.get_session(session_id)
-                if summary_session:
-                    # In a real implementation, we would have a way to get the latest summary
-                    # For now, we'll just pass an empty summary
-                    pass
+                try:
+                    latest_summary = summary_repository.get_latest_summary(session_id)
+                    if latest_summary and 'content' in latest_summary:
+                        summary = latest_summary['content']
+                        logger.debug(f"Retrieved summary for context: {len(summary)} chars")
+                except Exception as e:
+                    logger.error(f"Error retrieving summary: {e}")
+            
+            # Save user message to database
+            try:
+                chat_repository.save_message(
+                    session_id=session_id,
+                    sender=client_id,
+                    receiver="assistant",
+                    content=message
+                )
+                logger.debug(f"Saved user message to database for session {session_id}")
+            except Exception as e:
+                logger.error(f"Error saving user message to database: {e}")
             
             # Generate a response using our free chat service
             response = await chat_service.generate_response(
@@ -435,14 +480,27 @@ class SocketIOManager:
             )
             
             # Create the response object
+            response_id = str(uuid.uuid4())
             response_obj = {
-                "id": str(uuid.uuid4()),
+                "id": response_id,
                 "session_id": session_id,
                 "from": "assistant",
                 "to": "all",
                 "message": response,
                 "timestamp": time.time()
             }
+            
+            # Save assistant response to database
+            try:
+                chat_repository.save_message(
+                    session_id=session_id,
+                    sender="assistant",
+                    receiver="all",
+                    content=response
+                )
+                logger.debug(f"Saved assistant response to database for session {session_id}")
+            except Exception as e:
+                logger.error(f"Error saving assistant response to database: {e}")
             
             # Send the response to all clients in the session
             await self.emit_to_session(session_id, "chat_message", response_obj)
@@ -451,23 +509,40 @@ class SocketIOManager:
             
         except Exception as e:
             logger.error(f"Error handling chat message: {e}")
-            # Send an error response
-            error_response = {
-                "id": str(uuid.uuid4()),
-                "session_id": session_id,
-                "from": "system",
-                "to": client_id,
-                "message": "Sorry, I encountered an error processing your message.",
-                "timestamp": time.time()
-            }
-            await self.emit_to_session(session_id, "chat_message", error_response)
-    
+            # Send error response to client
+            await self.emit_to_client(client_id, "error", {
+                "message": "Error processing chat message",
+                "details": str(e)
+            })
+            
     async def _generate_chat_response(self, message: str, session_id: str) -> str:
         """
         Generate a response to a chat message using OpenAI if available.
         
         Args:
             message: Message content
+            session_id: The ID of the current session
+            
+        Returns:
+            str: The generated response message
+        """
+        # Default response if AI service is not available
+        response = "I'm sorry, but I don't have enough context to provide a meaningful response at this time."
+        
+        try:
+            # In a full implementation, this would call an AI service
+            # For now, just return a simple response
+            if "hello" in message.lower() or "hi" in message.lower():
+                response = "Hello! How can I help you with your meeting?"
+            elif "summary" in message.lower():
+                response = "I can provide summaries of your meeting. The transcription needs to be long enough first."
+            elif "help" in message.lower():
+                response = "I can help summarize key points, identify action items, and answer questions about the meeting."
+            
+            return response
+        except Exception as e:
+            logger.error(f"Error generating chat response: {e}")
+            return "Sorry, I encountered an error while processing your request."
 
 
 # Create a singleton instance

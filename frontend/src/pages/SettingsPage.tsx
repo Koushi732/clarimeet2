@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useTheme } from '../hooks/useTheme';
-import axios from 'axios';
+import { DatabaseService } from '../services/DatabaseService';
+import TranscriptionSettings, { TranscriptionSettings as TranscriptionSettingsType } from '../components/transcription/TranscriptionSettings';
+import LanguageSelector from '../components/language/LanguageSelector';
 
 // Icons
 import {
@@ -23,6 +25,8 @@ interface Settings {
   autoSave: boolean;
   autoTranscribe: boolean;
   autoSummarize: boolean;
+  userId?: string;
+  transcriptionSettings?: TranscriptionSettingsType;
 }
 
 const SettingsPage = (): React.ReactElement => {
@@ -35,42 +39,72 @@ const SettingsPage = (): React.ReactElement => {
     autoSave: true,
     autoTranscribe: true,
     autoSummarize: true,
+    userId: 'default-user', // Default user ID
   });
   
   const [isLoading, setIsLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [transcriptionSettings, setTranscriptionSettings] = useState<TranscriptionSettingsType | null>(null);
   
-  // Load settings on mount
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        // In a real app, this would fetch from an API
-        // const response = await axios.get('/api/settings');
-        // setSettings(response.data);
-        
-        // For now, we'll just use local storage
+  // Load settings from database
+  const loadSettings = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      // Load user settings from database
+      const userSettings = await DatabaseService.getUserSettings(settings.userId || 'default-user');
+      
+      if (userSettings) {
+        // Update settings with database values
+        setSettings(prev => ({
+          ...prev,
+          ...userSettings,
+        }));
+      } else {
+        // Fallback to localStorage if database fails
         const savedSettings = localStorage.getItem('clariimeet-settings');
         if (savedSettings) {
-          setSettings(JSON.parse(savedSettings));
+          setSettings(prev => ({
+            ...prev,
+            ...JSON.parse(savedSettings),
+          }));
         }
-      } catch (error) {
-        console.error('Error loading settings:', error);
       }
-    };
-    
+    } catch (error) {
+      console.error('Error loading settings:', error);
+      
+      // Fallback to localStorage if database fails
+      const savedSettings = localStorage.getItem('clariimeet-settings');
+      if (savedSettings) {
+        setSettings(prev => ({
+          ...prev,
+          ...JSON.parse(savedSettings),
+        }));
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [settings.userId]);
+
+  // Load settings on mount
+  useEffect(() => {
     loadSettings();
-  }, []);
+  }, [loadSettings]);
   
-  // Save settings
+  // Save settings to database
   const saveSettings = async () => {
     setSaveStatus('saving');
     setIsLoading(true);
     
     try {
-      // In a real app, this would save to an API
-      // await axios.put('/api/settings', settings);
+      // Save to database
+      if (settings.userId) {
+        const success = await DatabaseService.saveUserSettings(settings.userId, settings);
+        if (!success) {
+          throw new Error('Failed to save settings to database');
+        }
+      }
       
-      // For now, we'll just use local storage
+      // Backup to localStorage
       localStorage.setItem('clariimeet-settings', JSON.stringify(settings));
       
       // Update theme
@@ -101,6 +135,16 @@ const SettingsPage = (): React.ReactElement => {
     }
   };
   
+  // Handle transcription settings change
+  const handleTranscriptionSettingsChange = (newSettings: TranscriptionSettingsType) => {
+    setTranscriptionSettings(newSettings);
+    setSettings(prevSettings => ({
+      ...prevSettings,
+      transcriptionSettings: newSettings,
+      language: newSettings.language, // Update main language setting to match
+    }));
+  };
+  
   // Handle input change
   const handleChange = (field: keyof Settings, value: any) => {
     setSettings({
@@ -128,6 +172,33 @@ const SettingsPage = (): React.ReactElement => {
       <div className="bg-white dark:bg-dark-700 rounded-lg shadow-md overflow-hidden">
         <div className="p-6">
           <h2 className="text-xl font-semibold mb-6">Appearance</h2>
+          
+          {/* Language Selector */}
+          <div className="mb-8">
+            <h3 className="text-lg font-medium mb-3">Language Preferences</h3>
+            <div className="bg-white dark:bg-dark-600 p-4 rounded-md shadow-sm">
+              <LanguageSelector
+                selectedLanguage={settings.language}
+                onLanguageChange={(language) => handleChange('language', language)}
+                userId={settings.userId}
+                showNativeNames={true}
+                size="medium"
+              />
+            </div>
+          </div>
+
+          {/* Transcription Settings */}
+          <div className="mb-8">
+            <h3 className="text-lg font-medium mb-3">Transcription Settings</h3>
+            <div className="bg-white dark:bg-dark-600 p-4 rounded-md shadow-sm">
+              <TranscriptionSettings
+                onSettingsChange={handleTranscriptionSettingsChange}
+                initialSettings={settings.transcriptionSettings}
+                userId={settings.userId}
+                className="transcription-settings"
+              />
+            </div>
+          </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
             <div>

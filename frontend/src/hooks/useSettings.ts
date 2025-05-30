@@ -25,7 +25,7 @@ const defaultSettings: Settings = {
   autoSummarize: true,
   enableRealTimeAudio: true,
   apiBaseUrl: 'http://localhost:8000',
-  apiBaseWebSocketUrl: 'ws://localhost:8000',
+  apiBaseWebSocketUrl: 'ws://localhost:8080',
 };
 
 export const useSettings = () => {

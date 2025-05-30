@@ -10,11 +10,14 @@ Provides summarization and chat capabilities using Google's Gemini API (free tie
 import asyncio
 import logging
 import os
-import time
-import uuid
 import json
-import threading
-from typing import Dict, List, Optional, Any, Callable
+import time
+import asyncio
+import uuid
+from typing import Dict, List, Optional, Any, Callable, Set
+
+# Import database repositories
+from app.database import summary_repository, session_repository
 
 import aiohttp
 
@@ -110,26 +113,51 @@ class GeminiSummarizationSession:
         summary_types = ["bullet_points", "paragraph", "structured"]
         summary_type = summary_types[self.summary_updates % len(summary_types)]
         
-        text_to_summarize = self.transcript_buffer
+        transcript = self.transcript_buffer
         
-        # Generate summary based on type
-        if summary_type == "bullet_points":
-            content = await self._generate_bullet_summary(text_to_summarize)
-        elif summary_type == "structured":
-            content = await self._generate_structured_summary(text_to_summarize)
-        else:  # paragraph
-            content = await self._generate_paragraph_summary(text_to_summarize)
-        
-        # Add metadata
-        summary = {
-            "type": summary_type,
-            "content": content,
-            "session_id": self.session_id,
-            "timestamp": time.time(),
-            "update_id": f"summary_{self.session_id}_{self.summary_updates}"
-        }
-        
-        return summary
+        try:
+            if summary_type == "bullet_points":
+                content = await self._generate_bullet_summary(transcript)
+            elif summary_type == "structured":
+                content = await self._generate_structured_summary(transcript)
+            else:  # paragraph
+                content = await self._generate_paragraph_summary(transcript)
+            
+            summary_id = str(uuid.uuid4())
+            summary = {
+                "type": summary_type,
+                "content": content,
+                "timestamp": time.time(),
+                "session_id": self.session_id,
+                "id": summary_id
+            }
+            
+            # Save summary to database
+            try:
+                # Convert content to JSON string if it's a dict
+                content_str = json.dumps(content) if isinstance(content, dict) else content
+                
+                # Save to database
+                summary_repository.save_summary(
+                    session_id=self.session_id,
+                    content=content_str,
+                    summary_type=summary_type
+                )
+                logger.info(f"Saved {summary_type} summary to database for session {self.session_id}")
+            except Exception as db_error:
+                logger.error(f"Error saving summary to database: {db_error}")
+            
+            return summary
+        except Exception as e:
+            logger.error(f"Error in _create_summary: {e}")
+            # Return empty summary as fallback
+            return {
+                "type": "error",
+                "content": {"text": "An error occurred while generating summary."},
+                "timestamp": time.time(),
+                "session_id": self.session_id,
+                "id": str(uuid.uuid4())
+            }
     
     async def _generate_bullet_summary(self, text: str) -> Dict[str, Any]:
         """Generate a bullet-point summary using Gemini API"""
